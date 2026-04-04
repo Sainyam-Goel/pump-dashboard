@@ -172,18 +172,19 @@ if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginO
     <div class="card-title">Cash at Pump</div>
     <div class="card-value text-green" id="totalCash">--</div>
     <div class="card-sub" id="cashSub"></div>
+    <div class="card-sub text-muted" id="cashDate"></div>
   </div>
   <div class="card">
     <div class="card-icon">&#x1F4CB;</div>
     <div class="card-title">Credits Today</div>
     <div class="card-value text-orange" id="todayCredit">--</div>
-    <div class="card-sub" id="creditSub"></div>
+    <div class="card-sub text-muted" id="creditDate"></div>
   </div>
   <div class="card">
     <div class="card-icon">&#x1F4C9;</div>
     <div class="card-title">Expenses Today</div>
     <div class="card-value text-red" id="todayExpenses">--</div>
-    <div class="card-sub" id="expenseSub"></div>
+    <div class="card-sub text-muted" id="expenseDate"></div>
   </div>
 </div>
 
@@ -305,6 +306,9 @@ async function loadSummary() {
 
   // Row 2
   document.getElementById('totalCash').textContent = fmtR(today.total_cash);
+  document.getElementById('cashDate').textContent = fmtDate(today.date);
+  document.getElementById('creditDate').textContent = fmtDate(today.date);
+  document.getElementById('expenseDate').textContent = fmtDate(today.date);
   const prevCash = Number(yesterday.total_cash) || 0;
   const currCash = Number(today.total_cash) || 0;
   if (prevCash) {
@@ -324,7 +328,7 @@ async function loadFuelRate() {
   const r = rows[0];
   document.getElementById('petrolRate').textContent = fmtR(r.petrol_rate);
   document.getElementById('dieselRate').textContent = fmtR(r.diesel_rate);
-  document.getElementById('rateDate').textContent = 'Since ' + fmtDate(r.date);
+  document.getElementById('rateDate').textContent = fmtDate(r.date);
 }
 
 async function loadTanks() {
@@ -360,15 +364,32 @@ async function loadTanks() {
 }
 
 async function loadTanker() {
-  const rows = await query('tanker_unloading', 'order=date.desc&limit=1');
-  if (!rows.length) return;
-  const t = rows[0];
-  document.getElementById('tankerMS').textContent = t.ms_invoice > 0 ? fmt(t.ms_invoice) + 'L' : '--';
-  document.getElementById('tankerHSD').textContent = t.hsd_invoice > 0 ? fmt(t.hsd_invoice) + 'L' : '--';
-  const disc = [];
-  if (t.ms_invoice > 0) disc.push(`MS: ${t.ms_discrepancy > 0 ? '+' : ''}${fmt(t.ms_discrepancy)}L`);
-  if (t.hsd_invoice > 0) disc.push(`HSD: ${t.hsd_discrepancy > 0 ? '+' : ''}${fmt(t.hsd_discrepancy)}L`);
-  document.getElementById('tankerDate').textContent = fmtDate(t.date) + (disc.length ? ' | Disc: ' + disc.join(', ') : '');
+  const [unloading, tracker] = await Promise.all([
+    query('tanker_unloading', 'order=date.desc&limit=1'),
+    query('fuel_tanker_tracker', 'order=date.desc&limit=1'),
+  ]);
+
+  // Pick whichever source has more recent data
+  const uDate = unloading.length ? unloading[0].date : null;
+  const tDate = tracker.length ? tracker[0].date : null;
+  const useUnloading = uDate && (!tDate || uDate >= tDate);
+
+  if (useUnloading) {
+    const t = unloading[0];
+    document.getElementById('tankerMS').textContent = t.ms_invoice > 0 ? fmt(t.ms_invoice) + 'L' : '--';
+    document.getElementById('tankerHSD').textContent = t.hsd_invoice > 0 ? fmt(t.hsd_invoice) + 'L' : '--';
+    const disc = [];
+    if (t.ms_invoice > 0) disc.push(`MS: ${t.ms_discrepancy > 0 ? '+' : ''}${fmt(t.ms_discrepancy)}L`);
+    if (t.hsd_invoice > 0) disc.push(`HSD: ${t.hsd_discrepancy > 0 ? '+' : ''}${fmt(t.hsd_discrepancy)}L`);
+    document.getElementById('tankerDate').textContent = fmtDate(t.date) + (disc.length ? ' | Disc: ' + disc.join(', ') : '');
+  } else if (tracker.length) {
+    const t = tracker[0];
+    const msL = Math.round(Number(t.petrol_kl) * 1000);
+    const hsdL = Math.round(Number(t.diesel_kl) * 1000);
+    document.getElementById('tankerMS').textContent = msL > 0 ? fmt(msL) + 'L' : '--';
+    document.getElementById('tankerHSD').textContent = hsdL > 0 ? fmt(hsdL) + 'L' : '--';
+    document.getElementById('tankerDate').textContent = fmtDate(t.date) + ' | Invoice #' + t.invoice_no + ' (no offload data)';
+  }
 }
 
 async function loadSettlements() {
