@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bansiwala Filling Station</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0a0b10; --card: #13151e; --card-border: #1e2133; --card-hover: #181b28;
+  --text: #eaeaf0; --muted: #6b7194; --accent: #6366f1;
+  --green: #34d399; --red: #f87171; --orange: #fb923c; --yellow: #fbbf24;
+  --petrol: #f0b429; --diesel: #4ade80;
+  --glow-petrol: rgba(240,180,41,0.15); --glow-diesel: rgba(74,222,128,0.15); --glow-green: rgba(52,211,153,0.15);
+}
+body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 20px; max-width: 1200px; margin: 0 auto; }
+h1 { font-size: 1.5rem; font-weight: 800; background: linear-gradient(135deg, #f0b429, #a78bfa, #4ade80); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.subtitle { color: var(--muted); font-size: 0.8rem; margin-bottom: 24px; letter-spacing: 0.02em; }
+.grid { display: grid; gap: 14px; margin-bottom: 14px; }
+.grid-2 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.grid-3 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.card { background: var(--card); border: 1px solid var(--card-border); border-radius: 14px; padding: 20px; transition: border-color 0.2s, box-shadow 0.2s; }
+.card:hover { border-color: #2d3154; box-shadow: 0 4px 24px rgba(0,0,0,0.3); }
+.card-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 8px; font-weight: 600; }
+.card-value { font-size: 1.7rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.card-sub { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+.card-icon { font-size: 1.4rem; margin-bottom: 8px; }
+.section-title { font-size: 1rem; font-weight: 700; margin: 28px 0 14px; display: flex; align-items: center; gap: 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.8rem; }
+.section-title::after { content: ''; flex: 1; height: 1px; background: var(--card-border); }
+.badge { display: inline-block; padding: 3px 10px; border-radius: 9999px; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.03em; }
+.badge-green { background: #34d39918; color: var(--green); }
+.badge-red { background: #f8717118; color: var(--red); }
+.badge-orange { background: #fb923c18; color: var(--orange); }
+.badge-golden { background: #f0b42918; color: var(--petrol); }
+.badge-diesel { background: #4ade8018; color: var(--diesel); }
+.badge-blue { background: #60a5fa18; color: #60a5fa; }
+.badge-purple { background: #a78bfa18; color: #a78bfa; }
+table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+th { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--card-border); color: var(--muted); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+td { padding: 11px 14px; border-bottom: 1px solid #1a1d2e; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #181b2844; }
+.text-green { color: var(--green); }
+.text-red { color: var(--red); }
+.text-orange { color: var(--orange); }
+.text-blue { color: var(--petrol); }
+.text-purple { color: #a78bfa; }
+.text-muted { color: var(--muted); }
+.tank-bar { height: 28px; border-radius: 8px; background: #1a1d2e; position: relative; overflow: hidden; margin-top: 8px; }
+.tank-fill { height: 100%; border-radius: 8px; transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
+.tank-fill.ms { background: linear-gradient(90deg, #d4940a, #f0b429); box-shadow: 0 0 16px rgba(240,180,41,0.3); }
+.tank-fill.hsd { background: linear-gradient(90deg, #16a34a, #4ade80); box-shadow: 0 0 16px rgba(74,222,128,0.3); }
+.tank-label { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 0.7rem; font-weight: 700; text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+.tab-row { display: flex; gap: 6px; margin-bottom: 14px; }
+.tab { padding: 7px 18px; border-radius: 10px; border: 1px solid var(--card-border); background: transparent; color: var(--muted); cursor: pointer; font-size: 0.78rem; font-weight: 600; transition: all 0.2s; font-family: inherit; }
+.tab:hover { border-color: var(--accent); color: var(--text); }
+.tab.active { background: var(--accent); color: white; border-color: var(--accent); box-shadow: 0 0 20px rgba(99,102,241,0.3); }
+.loading { color: var(--muted); font-size: 0.82rem; padding: 20px; text-align: center; }
+.refresh-btn { background: var(--card); border: 1px solid var(--card-border); color: var(--muted); padding: 8px 16px; border-radius: 10px; cursor: pointer; font-size: 0.78rem; font-weight: 600; transition: all 0.2s; font-family: inherit; }
+.refresh-btn:hover { border-color: var(--accent); color: var(--text); box-shadow: 0 0 16px rgba(99,102,241,0.2); }
+.header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
+.nozzle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.nozzle-card { background: #181b28; border-radius: 10px; padding: 16px; border: 1px solid transparent; transition: border-color 0.2s; }
+.nozzle-card:hover { border-color: var(--card-border); }
+.nozzle-name { font-size: 0.75rem; color: var(--muted); margin-bottom: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.nozzle-reading { font-size: 1.15rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.nozzle-diff { font-size: 0.72rem; margin-top: 4px; font-weight: 500; }
+.warning-bar { background: linear-gradient(90deg, #f9731612, #f9731622); border: 1px solid #f9731633; border-radius: 10px; padding: 12px 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; font-size: 0.82rem; color: var(--orange); display: none; font-weight: 500; }
+.summary-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 14px; }
+.glow-card { position: relative; overflow: hidden; }
+.glow-card::before { content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, var(--glow-color, transparent) 0%, transparent 70%); opacity: 0.07; pointer-events: none; }
+.stat-pair { display: flex; align-items: baseline; gap: 8px; }
+.stat-unit { font-size: 0.85rem; font-weight: 500; color: var(--muted); }
+@media (max-width: 600px) {
+  body { padding: 12px; }
+  .card-value { font-size: 1.3rem; }
+  .nozzle-grid { grid-template-columns: 1fr; }
+  .summary-row { grid-template-columns: 1fr; }
+  .grid-3 { grid-template-columns: 1fr; }
+  .header { flex-direction: column; gap: 12px; }
+  #fuelRateBox div:first-child { justify-content: flex-start !important; }
+  table { font-size: 0.75rem; }
+  th, td { padding: 8px 8px; }
+  .card { padding: 16px; }
+  .card-icon { font-size: 1.2rem; }
+  h1 { font-size: 1.3rem; }
+  .tab { padding: 6px 12px; font-size: 0.72rem; }
+}
+</style>
+</head>
+<body>
+
+<div id="loginOverlay" style="position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;align-items:center;justify-content:center">
+  <div style="text-align:center">
+    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/a/a3/Indian_Oil_Logo.svg/200px-Indian_Oil_Logo.svg.png" alt="IOCL" style="height:60px;margin-bottom:16px" onerror="this.style.display='none'">
+    <h1 style="margin-bottom:4px">Bansiwala Filling Station</h1>
+    <div style="color:var(--muted);font-size:0.8rem;margin-bottom:24px">Nagla, Karnal</div>
+    <input id="passInput" type="password" placeholder="Enter passcode" style="background:var(--card);border:1px solid var(--card-border);color:var(--text);padding:12px 20px;border-radius:10px;font-size:1rem;font-family:inherit;width:220px;text-align:center;outline:none" onkeydown="if(event.key==='Enter')checkPass()">
+    <br><button onclick="checkPass()" style="margin-top:12px;background:var(--accent);border:none;color:white;padding:10px 32px;border-radius:10px;font-size:0.85rem;font-weight:600;cursor:pointer;font-family:inherit">Enter</button>
+    <div id="passError" style="color:var(--red);font-size:0.8rem;margin-top:10px;display:none">Incorrect passcode</div>
+  </div>
+</div>
+<script>
+function checkPass() {
+  const hash = '171254';
+  if (document.getElementById('passInput').value === hash) {
+    document.getElementById('loginOverlay').style.display = 'none';
+    sessionStorage.setItem('pump_auth', '1');
+  } else {
+    document.getElementById('passError').style.display = 'block';
+    document.getElementById('passInput').value = '';
+  }
+}
+if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginOverlay').style.display = 'none';
+</script>
+
+<div class="header">
+  <div style="display:flex;align-items:center;gap:14px">
+    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/a/a3/Indian_Oil_Logo.svg/200px-Indian_Oil_Logo.svg.png" alt="IOCL" style="height:44px" onerror="this.style.display='none'">
+    <div>
+      <h1>Bansiwala Filling Station</h1>
+      <div class="subtitle">Nagla, Karnal &bull; IOCL Dealer Code 171254 &bull; <span id="lastUpdated">Loading...</span></div>
+    </div>
+  </div>
+  <div style="text-align:right">
+    <div id="fuelRateBox" style="margin-bottom:6px">
+      <div style="display:flex;gap:14px;justify-content:flex-end;align-items:center">
+        <span style="font-size:0.65rem;font-weight:700;color:var(--petrol)">MS</span>
+        <span style="font-weight:800;color:var(--petrol)" id="petrolRate">--</span>
+        <span style="margin-left:4px;font-size:0.65rem;font-weight:700;color:var(--diesel)">HSD</span>
+        <span style="font-weight:800;color:var(--diesel)" id="dieselRate">--</span>
+      </div>
+      <div style="font-size:0.7rem;color:var(--muted);margin-top:2px" id="rateDate"></div>
+    </div>
+    <button class="refresh-btn" onclick="loadAll()">Refresh</button>
+  </div>
+</div>
+
+<div id="warnings" class="warning-bar"></div>
+
+<!-- Row 1: Sales -->
+<div class="summary-row">
+  <div class="card glow-card" style="--glow-color: var(--glow-diesel)">
+    <div class="card-icon">&#x26FD;&#x1F69C;</div>
+    <div class="card-title" style="color:var(--diesel)">HSD Sale (Diesel)</div>
+    <div class="stat-pair"><div class="card-value" id="hsdLiters">--</div></div>
+    <div class="card-sub" id="hsdIncome"></div>
+    <div class="card-sub text-muted" id="hsdDate"></div>
+  </div>
+  <div class="card glow-card" style="--glow-color: var(--glow-petrol)">
+    <div class="card-icon">&#x26FD;&#x1F697;</div>
+    <div class="card-title" style="color:var(--petrol)">MS Sale (Petrol)</div>
+    <div class="stat-pair"><div class="card-value" id="msLiters">--</div></div>
+    <div class="card-sub" id="msIncome"></div>
+    <div class="card-sub text-muted" id="msDate"></div>
+  </div>
+  <div class="card glow-card" style="--glow-color: var(--glow-green)">
+    <div class="card-icon">&#x1F4B2;</div>
+    <div class="card-title">Total Revenue</div>
+    <div class="card-value" id="totalIncome">--</div>
+    <div class="card-sub" id="incomeDate"></div>
+  </div>
+</div>
+
+<!-- Row 2: Cash, Credits, Expenses -->
+<div class="summary-row">
+  <div class="card">
+    <div class="card-icon">&#x1F4B5;</div>
+    <div class="card-title">Cash at Pump</div>
+    <div class="card-value text-green" id="totalCash">--</div>
+    <div class="card-sub" id="cashSub"></div>
+  </div>
+  <div class="card">
+    <div class="card-icon">&#x1F4CB;</div>
+    <div class="card-title">Credits Today</div>
+    <div class="card-value text-orange" id="todayCredit">--</div>
+    <div class="card-sub" id="creditSub"></div>
+  </div>
+  <div class="card">
+    <div class="card-icon">&#x1F4C9;</div>
+    <div class="card-title">Expenses Today</div>
+    <div class="card-value text-red" id="todayExpenses">--</div>
+    <div class="card-sub" id="expenseSub"></div>
+  </div>
+</div>
+
+<!-- Settlement -->
+<div class="grid grid-2">
+  <div class="card">
+    <div class="card-icon">&#x1F4B3;</div>
+    <div class="card-title">Last Settlement</div>
+    <div style="display:flex;gap:24px;margin-top:4px">
+      <div><span class="text-purple" style="font-size:0.7rem;font-weight:700">PhonePe</span><div style="font-size:1.3rem;font-weight:800" id="phonepeAmt">--</div></div>
+      <div><span class="text-blue" style="font-size:0.7rem;font-weight:700">CC</span><div style="font-size:1.3rem;font-weight:800" id="ccAmt">--</div></div>
+    </div>
+    <div class="card-sub" id="settlementDate"></div>
+  </div>
+</div>
+
+<!-- Tank Levels -->
+<div class="section-title">Tank Levels <span id="tankDate" class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0"></span></div>
+<div class="grid grid-3" id="tankCards">
+  <div class="card">
+    <div class="card-title">Tank 1 &mdash; MS (Petrol) <span class="badge badge-golden">20KL</span></div>
+    <div class="card-value" style="color:var(--petrol)" id="msVol">--</div>
+    <div class="tank-bar"><div class="tank-fill ms" id="msBar" style="width:0%"><span class="tank-label" id="msPct"></span></div></div>
+    <div class="card-sub" id="msWater"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Tank 2 &mdash; HSD T1 <span class="badge badge-diesel">20KL</span></div>
+    <div class="card-value" style="color:var(--diesel)" id="hsdT1Vol">--</div>
+    <div class="tank-bar"><div class="tank-fill hsd" id="hsdT1Bar" style="width:0%"><span class="tank-label" id="hsdT1Pct"></span></div></div>
+    <div class="card-sub" id="hsdT1Water"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Tank 3 &mdash; HSD T2 <span class="badge badge-diesel">20KL</span></div>
+    <div class="card-value" style="color:var(--diesel)" id="hsdT2Vol">--</div>
+    <div class="tank-bar"><div class="tank-fill hsd" id="hsdT2Bar" style="width:0%"><span class="tank-label" id="hsdT2Pct"></span></div></div>
+    <div class="card-sub" id="hsdT2Water"></div>
+  </div>
+</div>
+
+<!-- Last Tanker -->
+<div class="grid grid-2" style="margin-top:-2px">
+  <div class="card">
+    <div class="card-icon">&#x1F69A;</div>
+    <div class="card-title">Last Tanker Delivery</div>
+    <div style="display:flex;gap:24px;margin-top:4px">
+      <div><span style="font-size:0.7rem;font-weight:700;color:var(--petrol)">MS</span><div style="font-size:1.3rem;font-weight:800" id="tankerMS">--</div></div>
+      <div><span style="font-size:0.7rem;font-weight:700;color:var(--diesel)">HSD</span><div style="font-size:1.3rem;font-weight:800" id="tankerHSD">--</div></div>
+    </div>
+    <div class="card-sub" id="tankerDate"></div>
+  </div>
+</div>
+
+<!-- Nozzle Readings -->
+<div class="section-title">Nozzle Readings <span id="nozzleDate" class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0"></span></div>
+<div class="card">
+  <div class="nozzle-grid" id="nozzleGrid">
+    <div class="loading">Loading nozzle data...</div>
+  </div>
+</div>
+
+<!-- Credit Ledger -->
+<div class="section-title">Credit Ledger &mdash; Outstanding</div>
+<div class="card" style="padding:0;overflow:hidden;border-radius:14px">
+  <table id="creditTable">
+    <thead><tr><th>Party</th><th style="text-align:right">Outstanding</th><th style="text-align:right">Last Credit</th><th style="text-align:right">Last Payment</th></tr></thead>
+    <tbody id="creditBody"><tr><td colspan="4" class="loading">Loading...</td></tr></tbody>
+  </table>
+</div>
+
+<!-- Sales Trends -->
+<div class="section-title">Sales Trends</div>
+<div class="tab-row">
+  <button class="tab active" onclick="setTrendPeriod('daily',this)">Daily</button>
+  <button class="tab" onclick="setTrendPeriod('weekly',this)">Weekly</button>
+  <button class="tab" onclick="setTrendPeriod('monthly',this)">Monthly</button>
+</div>
+<div class="card">
+  <canvas id="salesChart" height="300"></canvas>
+</div>
+
+<div style="text-align:center;padding:36px 0 20px;color:#3a3d52;font-size:0.72rem;font-weight:500">
+  Bansiwala Filling Station &bull; Nagla, Karnal &bull; Powered by Supabase
+</div>
+
+<script>
+const SUPABASE_URL = 'https://zkomggcvakdocbgrglkn.supabase.co/rest/v1';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inprb21nZ2N2YWtkb2NiZ3JnbGtuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4NjI5MjIsImV4cCI6MjA5MDQzODkyMn0.Ma3NTFbjiLk4iFN7jgA3jXWT7m3di6gayD3svsnwQpc';
+const HEADERS = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` };
+const TANK_CAPACITY = 20000;
+const LOW_FUEL = 3000;
+
+let salesChart = null;
+let allLedgerData = [];
+
+function fmt(n) { return n == null ? '--' : Number(n).toLocaleString('en-IN'); }
+function fmtR(n) { return n == null ? '--' : '\u20B9' + Number(n).toLocaleString('en-IN'); }
+function fmtDate(d) { if (!d) return '--'; const dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }); }
+function fmtTime(t) { if (!t) return ''; const parts = t.split(':'); let h = parseInt(parts[0]); const m = parts[1]; const ampm = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return h + ':' + m + ' ' + ampm; }
+
+async function query(table, params = '') {
+  const res = await fetch(`${SUPABASE_URL}/${table}?${params}`, { headers: HEADERS });
+  return res.json();
+}
+
+async function loadSummary() {
+  const rows = await query('daily_ledger', 'order=date.desc&limit=2');
+  if (!rows.length) return;
+  const today = rows[0];
+  const yesterday = rows[1] || {};
+
+  document.getElementById('hsdLiters').textContent = fmt(today.hsd_sale_liters) + ' L';
+  document.getElementById('hsdIncome').textContent = fmtR(today.hsd_income);
+  document.getElementById('hsdDate').textContent = fmtDate(today.date);
+  document.getElementById('msLiters').textContent = fmt(today.ms_sale_liters) + ' L';
+  document.getElementById('msIncome').textContent = fmtR(today.ms_income);
+  document.getElementById('msDate').textContent = fmtDate(today.date);
+  document.getElementById('totalIncome').textContent = fmtR(today.total_income);
+  document.getElementById('incomeDate').textContent = fmtDate(today.date);
+
+  // Row 2
+  document.getElementById('totalCash').textContent = fmtR(today.total_cash);
+  const prevCash = Number(yesterday.total_cash) || 0;
+  const currCash = Number(today.total_cash) || 0;
+  if (prevCash) {
+    const diff = currCash - prevCash;
+    document.getElementById('cashSub').innerHTML = `Yesterday: ${fmtR(prevCash)} <span style="color:${diff >= 0 ? 'var(--green)' : 'var(--red)'}">(${diff >= 0 ? '+' : ''}${fmtR(diff)})</span>`;
+  }
+
+  document.getElementById('todayCredit').textContent = fmtR(today.total_credit);
+  document.getElementById('todayExpenses').textContent = fmtR(today.total_expenses);
+
+  document.getElementById('lastUpdated').textContent = 'Ledger: ' + fmtDate(today.date);
+}
+
+async function loadFuelRate() {
+  const rows = await query('fuel_rates', 'order=date.desc&limit=1');
+  if (!rows.length) return;
+  const r = rows[0];
+  document.getElementById('petrolRate').textContent = fmtR(r.petrol_rate);
+  document.getElementById('dieselRate').textContent = fmtR(r.diesel_rate);
+  document.getElementById('rateDate').textContent = 'Since ' + fmtDate(r.date);
+}
+
+async function loadTanks() {
+  const rows = await query('tank_status', 'order=date.desc,created_at.desc&limit=1');
+  if (!rows.length) return;
+  const t = rows[0];
+  const warnings = [];
+
+  function setTank(prefix, vol, water, barId, pctId, waterId) {
+    const v = Number(vol) || 0;
+    const pct = Math.min(100, (v / TANK_CAPACITY) * 100);
+    document.getElementById(prefix).textContent = Math.round(v) + ' L';
+    document.getElementById(barId).style.width = pct + '%';
+    document.getElementById(pctId).textContent = Math.round(pct) + '%';
+    if (water && Number(water) > 0) document.getElementById(waterId).textContent = 'Water: ' + water + 'mm';
+    else document.getElementById(waterId).textContent = '';
+    if (v < LOW_FUEL) warnings.push(`${prefix === 'msVol' ? 'MS' : prefix === 'hsdT1Vol' ? 'HSD T1' : 'HSD T2'} tank low: ${fmt(v)}L`);
+  }
+
+  document.getElementById('tankDate').textContent = '\u2014 ' + fmtDate(t.date) + (t.time_str ? ', ' + fmtTime(t.time_str) : '');
+
+  setTank('msVol', t.ms_volume, t.ms_water, 'msBar', 'msPct', 'msWater');
+  setTank('hsdT1Vol', t.hsd_t1_volume, t.hsd_t1_water, 'hsdT1Bar', 'hsdT1Pct', 'hsdT1Water');
+  setTank('hsdT2Vol', t.hsd_t2_volume, t.hsd_t2_water, 'hsdT2Bar', 'hsdT2Pct', 'hsdT2Water');
+
+  const warnEl = document.getElementById('warnings');
+  if (warnings.length) {
+    warnEl.style.display = 'flex';
+    warnEl.textContent = '\u26A0\uFE0F ' + warnings.join(' | ');
+  } else {
+    warnEl.style.display = 'none';
+  }
+}
+
+async function loadTanker() {
+  const rows = await query('tanker_unloading', 'order=date.desc&limit=1');
+  if (!rows.length) return;
+  const t = rows[0];
+  document.getElementById('tankerMS').textContent = t.ms_invoice > 0 ? fmt(t.ms_invoice) + 'L' : '--';
+  document.getElementById('tankerHSD').textContent = t.hsd_invoice > 0 ? fmt(t.hsd_invoice) + 'L' : '--';
+  const disc = [];
+  if (t.ms_invoice > 0) disc.push(`MS: ${t.ms_discrepancy > 0 ? '+' : ''}${fmt(t.ms_discrepancy)}L`);
+  if (t.hsd_invoice > 0) disc.push(`HSD: ${t.hsd_discrepancy > 0 ? '+' : ''}${fmt(t.hsd_discrepancy)}L`);
+  document.getElementById('tankerDate').textContent = fmtDate(t.date) + (disc.length ? ' | Disc: ' + disc.join(', ') : '');
+}
+
+async function loadSettlements() {
+  const phonepe = await query('settlements', 'source=eq.PHONEPE&order=date.desc&limit=1');
+  const cc = await query('settlements', 'source=eq.CC&order=date.desc&limit=1');
+  if (phonepe.length) document.getElementById('phonepeAmt').textContent = fmtR(phonepe[0].amount);
+  if (cc.length) document.getElementById('ccAmt').textContent = fmtR(cc[0].amount);
+  const dates = [];
+  if (phonepe.length) dates.push('PhonePe: ' + fmtDate(phonepe[0].date));
+  if (cc.length) dates.push('CC: ' + fmtDate(cc[0].date));
+  document.getElementById('settlementDate').textContent = dates.join(' | ');
+}
+
+async function loadNozzles() {
+  const rows = await query('nozzle_receipts', 'order=date.desc,nozzle_id&limit=20');
+  if (!rows.length) { document.getElementById('nozzleGrid').innerHTML = '<div class="loading">No nozzle data</div>'; return; }
+
+  const byDate = {};
+  rows.forEach(r => { if (!byDate[r.date]) byDate[r.date] = {}; byDate[r.date][r.nozzle_id] = Number(r.reading); });
+  const dates = Object.keys(byDate).sort().reverse();
+  const today = byDate[dates[0]] || {};
+  const yesterday = byDate[dates[1]] || {};
+
+  const nozzles = [
+    { id: 'NOZ11', label: 'HSD 1 (Pump 1)', color: 'var(--diesel)' },
+    { id: 'NOZ15', label: 'HSD 2 (Pump 3)', color: 'var(--diesel)' },
+    { id: 'NOZ10', label: 'MS 1 (Pump 2)', color: 'var(--petrol)' },
+    { id: 'NOZ14', label: 'MS 2 (Pump 4)', color: 'var(--petrol)' },
+  ];
+
+  const ledgerRows = await query('daily_ledger', 'order=date.desc&limit=2&select=date,noz11_reading,noz15_reading,noz10_reading,noz14_reading');
+  const ledgerToday = ledgerRows[0] || {};
+  const ledgerYesterday = ledgerRows[1] || {};
+
+  // Get time from the first nozzle entry of the latest date
+  const latestRows = rows.filter(r => r.date === dates[0]);
+  const nozzleTime = latestRows.length && latestRows[0].time_str ? ', ' + fmtTime(latestRows[0].time_str) : '';
+  document.getElementById('nozzleDate').textContent = '\u2014 ' + fmtDate(dates[0]) + nozzleTime;
+
+  let html = '';
+  nozzles.forEach(n => {
+    const colMap = { 'NOZ11': 'noz11_reading', 'NOZ15': 'noz15_reading', 'NOZ10': 'noz10_reading', 'NOZ14': 'noz14_reading' };
+    const tVal = today[n.id] || Number(ledgerToday[colMap[n.id]]) || null;
+    const yVal = yesterday[n.id] || Number(ledgerYesterday[colMap[n.id]]) || null;
+    const diff = (tVal && yVal) ? tVal - yVal : null;
+    html += `<div class="nozzle-card">
+      <div class="nozzle-name" style="color:${n.color}">${n.label}</div>
+      <div class="nozzle-reading">${tVal ? fmt(tVal) : '--'}</div>
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:4px">Yesterday: ${yVal ? fmt(yVal) : '--'}</div>
+      <div class="nozzle-diff ${diff != null ? (diff > 0 ? 'text-green' : 'text-red') : 'text-muted'}">
+        ${diff != null ? (diff > 0 ? '+' : '') + fmt(diff) + ' L sold' : 'No data'}
+      </div>
+    </div>`;
+  });
+  document.getElementById('nozzleGrid').innerHTML = html;
+}
+
+async function loadCredits() {
+  const rows = await query('credit_ledger', 'select=party_name,type,amount,date&order=date.desc');
+  if (!rows.length) { document.getElementById('creditBody').innerHTML = '<tr><td colspan="4" class="loading">No credit data</td></tr>'; return; }
+
+  const parties = {};
+  rows.forEach(r => {
+    if (!parties[r.party_name]) parties[r.party_name] = { balance: 0, lastCredit: null, lastCreditDate: null, lastDebit: null, lastDebitDate: null };
+    const amt = Number(r.amount) || 0;
+    if (r.type === 'credit') {
+      parties[r.party_name].balance += amt;
+      if (!parties[r.party_name].lastCreditDate || r.date > parties[r.party_name].lastCreditDate) {
+        parties[r.party_name].lastCredit = amt;
+        parties[r.party_name].lastCreditDate = r.date;
+      }
+    } else if (r.type === 'debit') {
+      parties[r.party_name].balance -= amt;
+      if (!parties[r.party_name].lastDebitDate || r.date > parties[r.party_name].lastDebitDate) {
+        parties[r.party_name].lastDebit = amt;
+        parties[r.party_name].lastDebitDate = r.date;
+      }
+    }
+  });
+
+  const sorted = Object.entries(parties)
+    .filter(([_, v]) => Math.abs(v.balance) >= 10)
+    .sort((a, b) => Math.abs(b[1].balance) - Math.abs(a[1].balance));
+
+  let totalOutstanding = 0;
+  let html = '';
+  sorted.forEach(([name, data]) => {
+    totalOutstanding += data.balance;
+    const cls = data.balance > 0 ? 'text-red' : 'text-green';
+    const creditInfo = data.lastCredit ? `${fmtR(data.lastCredit)}<br><span style="font-size:0.7rem">${fmtDate(data.lastCreditDate)}</span>` : '<span class="text-muted">--</span>';
+    const debitInfo = data.lastDebit ? `${fmtR(data.lastDebit)}<br><span style="font-size:0.7rem">${fmtDate(data.lastDebitDate)}</span>` : '<span class="text-muted">--</span>';
+    html += `<tr><td>${name}</td><td style="text-align:right" class="${cls}">${fmtR(Math.abs(data.balance))} ${data.balance > 0 ? 'due' : 'excess'}</td><td style="text-align:right" class="text-orange">${creditInfo}</td><td style="text-align:right" class="text-green">${debitInfo}</td></tr>`;
+  });
+  html += `<tr style="font-weight:700;background:#181b28"><td>Total Outstanding</td><td style="text-align:right" class="${totalOutstanding > 0 ? 'text-red' : 'text-green'}">${fmtR(Math.abs(totalOutstanding))}</td><td></td><td></td></tr>`;
+  document.getElementById('creditBody').innerHTML = html;
+}
+
+async function loadSalesData() {
+  allLedgerData = await query('daily_ledger', 'order=date.asc&select=date,hsd_sale_liters,ms_sale_liters,hsd_income,ms_income,total_income');
+  renderChart('daily');
+}
+
+function setTrendPeriod(period, btn) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  renderChart(period);
+}
+
+function renderChart(period) {
+  const data = allLedgerData;
+  if (!data.length) return;
+
+  let labels, hsdData, msData;
+
+  if (period === 'daily') {
+    const recent = data.slice(-30);
+    labels = recent.map(r => { const d = new Date(r.date + 'T00:00:00'); return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }); });
+    hsdData = recent.map(r => Number(r.hsd_sale_liters) || 0);
+    msData = recent.map(r => Number(r.ms_sale_liters) || 0);
+  } else if (period === 'weekly') {
+    const weeks = {};
+    data.forEach(r => {
+      const d = new Date(r.date + 'T00:00:00');
+      const weekStart = new Date(d); weekStart.setDate(d.getDate() - d.getDay());
+      const key = weekStart.toISOString().slice(0, 10);
+      if (!weeks[key]) weeks[key] = { hsd: 0, ms: 0 };
+      weeks[key].hsd += Number(r.hsd_sale_liters) || 0;
+      weeks[key].ms += Number(r.ms_sale_liters) || 0;
+    });
+    const sorted = Object.entries(weeks).sort((a, b) => a[0].localeCompare(b[0]));
+    labels = sorted.map(([k]) => { const d = new Date(k + 'T00:00:00'); return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }); });
+    hsdData = sorted.map(([_, v]) => v.hsd);
+    msData = sorted.map(([_, v]) => v.ms);
+  } else {
+    const months = {};
+    data.forEach(r => {
+      const key = r.date.slice(0, 7);
+      if (!months[key]) months[key] = { hsd: 0, ms: 0 };
+      months[key].hsd += Number(r.hsd_sale_liters) || 0;
+      months[key].ms += Number(r.ms_sale_liters) || 0;
+    });
+    const sorted = Object.entries(months).sort((a, b) => a[0].localeCompare(b[0]));
+    labels = sorted.map(([k]) => { const [y, m] = k.split('-'); return new Date(y, m - 1).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' }); });
+    hsdData = sorted.map(([_, v]) => v.hsd);
+    msData = sorted.map(([_, v]) => v.ms);
+  }
+
+  if (salesChart) salesChart.destroy();
+  salesChart = new Chart(document.getElementById('salesChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'HSD (Diesel)', data: hsdData, backgroundColor: '#4ade8055', borderColor: '#4ade80', borderWidth: 1.5, borderRadius: 6 },
+        { label: 'MS (Petrol)', data: msData, backgroundColor: '#f0b42955', borderColor: '#f0b429', borderWidth: 1.5, borderRadius: 6 },
+      ]
+    },
+    plugins: period !== 'daily' ? [ChartDataLabels] : [],
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#6b7194', font: { size: 12, family: 'Inter' }, usePointStyle: true, pointStyle: 'rectRounded' } },
+        datalabels: period !== 'daily' ? {
+          anchor: 'end', align: 'top', color: '#9ca3c0', font: { size: 10, weight: 600, family: 'Inter' },
+          formatter: v => v > 0 ? v.toLocaleString('en-IN') : ''
+        } : { display: false }
+      },
+      scales: {
+        x: { ticks: { color: '#6b7194', font: { size: 10, family: 'Inter' } }, grid: { color: '#1e2133' }, stacked: false },
+        y: { ticks: { color: '#6b7194', font: { family: 'Inter' }, callback: v => v.toLocaleString('en-IN') + 'L' }, grid: { color: '#1e2133' } }
+      }
+    }
+  });
+}
+
+async function loadAll() {
+  await Promise.all([
+    loadSummary(),
+    loadFuelRate(),
+    loadTanks(),
+    loadTanker(),
+    loadSettlements(),
+    loadNozzles(),
+    loadCredits(),
+    loadSalesData(),
+  ]);
+}
+
+loadAll();
+</script>
+</body>
+</html>
