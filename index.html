@@ -355,9 +355,9 @@ async function loadSales() {
   if (!data || !data.stats) return;
   const s = data.stats;
 
-  const prevDay = new Date(shiftDate + 'T00:00:00');
+  const prevDay = new Date(shiftDate + 'T12:00:00');
   prevDay.setDate(prevDay.getDate() - 1);
-  const prevISO = prevDay.toISOString().slice(0, 10);
+  const prevISO = prevDay.getFullYear() + '-' + String(prevDay.getMonth()+1).padStart(2,'0') + '-' + String(prevDay.getDate()).padStart(2,'0');
   document.getElementById('financialsDate').textContent = '\u2014 ' + fmtDate(prevISO) + ' 9AM \u2192 ' + fmtDate(shiftDate) + ' 9AM';
 
   document.getElementById('hsdLiters').textContent = fmt(Math.round(s.hsd_total_l)) + ' L';
