@@ -589,25 +589,37 @@ async function loadIrasFreshness() {
 
 async function loadTestingFuel() {
   try {
-    const rows = await query('testing_fuel', 'order=date.desc&limit=8');
-    if (!rows.length) return;
-    const latestDate = rows[0].date;
-    const todayRows = rows.filter(r => r.date === latestDate);
-    if (!todayRows.length) return;
+    // Use same shift date as financials (yesterday 9AM → today 9AM)
+    const dateRows = await query('iras_transactions', 'order=date.desc&limit=2&select=date');
+    if (!dateRows.length) return;
+    const latest = dateRows[0].date;
+    const todayISO = new Date().toLocaleDateString('en-CA');
+    const shiftDate = (latest === todayISO && dateRows.length > 1) ? dateRows[1].date : latest;
+    const prevDay = new Date(shiftDate + 'T12:00:00');
+    prevDay.setDate(prevDay.getDate() - 1);
+    const prevISO = prevDay.getFullYear() + '-' + String(prevDay.getMonth()+1).padStart(2,'0') + '-' + String(prevDay.getDate()).padStart(2,'0');
+
+    // Query testing transactions (payment_code=102) for the shift period
+    const shiftRows = [
+      ...await query('iras_transactions', `date=eq.${prevISO}&time_str=gte.09:00&payment_code=eq.102&select=nozzle_no,product,quantity`),
+      ...await query('iras_transactions', `date=eq.${shiftDate}&time_str=lt.09:00&payment_code=eq.102&select=nozzle_no,product,quantity`),
+    ];
+    if (!shiftRows.length) return;
 
     let hsd = 0, ms = 0;
-    const nozzleDetail = [];
-    todayRows.forEach(r => {
-      const litres = Number(r.litres) || 0;
-      if (r.nozzle_id === 'NOZ11' || r.nozzle_id === 'NOZ15') { hsd += litres; }
-      else { ms += litres; }
-      nozzleDetail.push(`${r.nozzle_id}: ${litres}L`);
+    const nozzleMap = {};
+    shiftRows.forEach(r => {
+      const litres = Number(r.quantity) || 0;
+      const nid = 'NOZ' + r.nozzle_no;
+      nozzleMap[nid] = (nozzleMap[nid] || 0) + litres;
+      if (r.product === 'HSD') { hsd += litres; } else { ms += litres; }
     });
+    const nozzleDetail = Object.entries(nozzleMap).map(([k, v]) => `${k}: ${v}L`);
 
     document.getElementById('testingHSD').textContent = hsd + ' L';
     document.getElementById('testingMS').textContent = ms + ' L';
     document.getElementById('testingTotal').textContent = (hsd + ms) + ' L';
-    document.getElementById('testingDate').textContent = fmtDate(latestDate);
+    document.getElementById('testingDate').textContent = fmtDate(prevISO) + ' 9AM \u2192 ' + fmtDate(shiftDate) + ' 9AM';
     document.getElementById('testingDetail').textContent = nozzleDetail.join(' | ');
     document.getElementById('testingFuelSection').style.display = 'block';
   } catch (e) { console.error('Testing fuel load failed:', e); }
