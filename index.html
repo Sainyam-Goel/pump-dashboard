@@ -233,7 +233,6 @@ if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginO
       <div><span style="font-size:0.7rem;font-weight:700;color:var(--diesel)">HSD</span><div style="font-size:1.3rem;font-weight:800" id="tankerHSD">--</div></div>
     </div>
     <div class="card-sub" id="tankerDate"></div>
-    <div class="card-sub" id="tankerTruck" style="color:var(--muted)"></div>
   </div>
 </div>
 
@@ -470,44 +469,31 @@ async function loadTanks() {
 }
 
 async function loadTanker() {
-  // Primary: IRAS receipts (automated), fallback: manual tanker_unloading
-  const [irasRec, unloading] = await Promise.all([
-    query('iras_receipts', 'order=date.desc&limit=5'),
+  const [unloading, tracker] = await Promise.all([
     query('tanker_unloading', 'order=date.desc&limit=1'),
+    query('fuel_tanker_tracker', 'order=date.desc&limit=1'),
   ]);
 
-  if (irasRec.length > 0) {
-    // Group IRAS receipts by date, pick the most recent date
-    const byDate = {};
-    irasRec.forEach(r => {
-      if (!byDate[r.date]) byDate[r.date] = { ms: 0, hsd: 0, trucks: [], invoice: '' };
-      const qty = Number(r.invoice_qty) || 0;
-      if (r.product === 'MS') byDate[r.date].ms += qty;
-      else byDate[r.date].hsd += qty;
-      if (r.truck_no && !byDate[r.date].trucks.includes(r.truck_no)) byDate[r.date].trucks.push(r.truck_no);
-      if (r.invoice_no) byDate[r.date].invoice = r.invoice_no;
-    });
-    const latestDate = Object.keys(byDate).sort().reverse()[0];
-    const d = byDate[latestDate];
-    document.getElementById('tankerMS').textContent = d.ms > 0 ? fmt(d.ms) + 'L' : '--';
-    document.getElementById('tankerHSD').textContent = d.hsd > 0 ? fmt(d.hsd) + 'L' : '--';
-    document.getElementById('tankerDate').textContent = fmtDate(latestDate) + (d.invoice ? ' | Inv #' + d.invoice : '');
-    document.getElementById('tankerTruck').textContent = d.trucks.length ? 'Truck: ' + d.trucks.join(', ') : '';
+  // Pick whichever source has more recent data
+  const uDate = unloading.length ? unloading[0].date : null;
+  const tDate = tracker.length ? tracker[0].date : null;
+  const useUnloading = uDate && (!tDate || uDate >= tDate);
 
-    // If manual data is more recent, show that instead
-    if (unloading.length && unloading[0].date > latestDate) {
-      const t = unloading[0];
-      document.getElementById('tankerMS').textContent = t.ms_invoice > 0 ? fmt(t.ms_invoice) + 'L' : '--';
-      document.getElementById('tankerHSD').textContent = t.hsd_invoice > 0 ? fmt(t.hsd_invoice) + 'L' : '--';
-      document.getElementById('tankerDate').textContent = fmtDate(t.date);
-      document.getElementById('tankerTruck').textContent = '';
-    }
-  } else if (unloading.length) {
+  if (useUnloading) {
     const t = unloading[0];
     document.getElementById('tankerMS').textContent = t.ms_invoice > 0 ? fmt(t.ms_invoice) + 'L' : '--';
     document.getElementById('tankerHSD').textContent = t.hsd_invoice > 0 ? fmt(t.hsd_invoice) + 'L' : '--';
-    document.getElementById('tankerDate').textContent = fmtDate(t.date);
-    document.getElementById('tankerTruck').textContent = '';
+    const disc = [];
+    if (t.ms_invoice > 0) disc.push(`MS: ${t.ms_discrepancy > 0 ? '+' : ''}${fmt(t.ms_discrepancy)}L`);
+    if (t.hsd_invoice > 0) disc.push(`HSD: ${t.hsd_discrepancy > 0 ? '+' : ''}${fmt(t.hsd_discrepancy)}L`);
+    document.getElementById('tankerDate').textContent = fmtDate(t.date) + (disc.length ? ' | Disc: ' + disc.join(', ') : '');
+  } else if (tracker.length) {
+    const t = tracker[0];
+    const msL = Math.round(Number(t.petrol_kl) * 1000);
+    const hsdL = Math.round(Number(t.diesel_kl) * 1000);
+    document.getElementById('tankerMS').textContent = msL > 0 ? fmt(msL) + 'L' : '--';
+    document.getElementById('tankerHSD').textContent = hsdL > 0 ? fmt(hsdL) + 'L' : '--';
+    document.getElementById('tankerDate').textContent = fmtDate(t.date) + ' | Invoice #' + t.invoice_no + ' (no offload data)';
   }
 }
 
