@@ -141,6 +141,8 @@ if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginO
 
 <div id="warnings" class="warning-bar"></div>
 
+<div class="section-title">Financials <span id="financialsDate" class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0"></span></div>
+
 <!-- Row 1: Sales -->
 <div class="summary-row">
   <div class="card glow-card" style="--glow-color: var(--glow-diesel)">
@@ -354,6 +356,12 @@ async function loadSales() {
   if (!data || !data.stats) return;
   const s = data.stats;
 
+  // Shift period label: "5 Apr 9AM — 6 Apr 9AM"
+  const prevDay = new Date(shiftDate + 'T00:00:00');
+  prevDay.setDate(prevDay.getDate() - 1);
+  const prevISO = prevDay.toISOString().slice(0, 10);
+  document.getElementById('financialsDate').textContent = '\u2014 ' + fmtDate(prevISO) + ' 9AM \u2192 ' + fmtDate(shiftDate) + ' 9AM';
+
   document.getElementById('hsdLiters').textContent = fmt(Math.round(s.hsd_total_l)) + ' L';
   document.getElementById('hsdIncome').textContent = fmtR(Math.round(s.hsd_total_amt));
   document.getElementById('hsdDate').textContent = fmtDate(shiftDate);
@@ -361,7 +369,7 @@ async function loadSales() {
   document.getElementById('msIncome').textContent = fmtR(Math.round(s.ms_total_amt));
   document.getElementById('msDate').textContent = fmtDate(shiftDate);
   document.getElementById('totalIncome').textContent = fmtR(Math.round(s.hsd_total_amt + s.ms_total_amt));
-  document.getElementById('incomeDate').textContent = fmtDate(shiftDate) + ' (9AM\u21929AM)';
+  document.getElementById('incomeDate').textContent = fmtDate(shiftDate);
 }
 
 async function loadCashCredits() {
