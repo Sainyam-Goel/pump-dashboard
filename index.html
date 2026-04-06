@@ -499,10 +499,14 @@ async function loadNozzles() {
   const ledgerToday = ledgerRows[0] || {};
   const ledgerYesterday = ledgerRows[1] || {};
 
-  // Get time from the first nozzle entry of the latest date
+  // Show period: yesterday 9AM → today 9AM (totalizer diff period)
   const latestRows = rows.filter(r => r.date === dates[0]);
-  const nozzleTime = latestRows.length && latestRows[0].time_str ? ', ' + fmtTime(latestRows[0].time_str) : '';
-  document.getElementById('nozzleDate').textContent = '\u2014 ' + fmtDate(dates[0]) + nozzleTime;
+  const nozzleTime = latestRows.length && latestRows[0].time_str ? latestRows[0].time_str.slice(0,5) : '9AM';
+  if (dates[1]) {
+    document.getElementById('nozzleDate').textContent = '\u2014 ' + fmtDate(dates[1]) + ' 9AM \u2192 ' + fmtDate(dates[0]) + ' 9AM';
+  } else {
+    document.getElementById('nozzleDate').textContent = '\u2014 ' + fmtDate(dates[0]);
+  }
 
   let html = '';
   nozzles.forEach(n => {
