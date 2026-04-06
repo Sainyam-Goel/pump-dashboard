@@ -194,8 +194,8 @@ if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginO
     <div class="card-icon">&#x1F4B3;</div>
     <div class="card-title">Last Settlement</div>
     <div style="display:flex;gap:24px;margin-top:4px">
-      <div><span class="text-purple" style="font-size:0.7rem;font-weight:700">PhonePe</span><div style="font-size:1.3rem;font-weight:800" id="phonepeAmt">--</div></div>
-      <div><span class="text-blue" style="font-size:0.7rem;font-weight:700">CC</span><div style="font-size:1.3rem;font-weight:800" id="ccAmt">--</div></div>
+      <div><span class="text-purple" style="font-size:0.7rem;font-weight:700">PhonePe</span><div style="font-size:1.3rem;font-weight:800" id="phonepeAmt">--</div><div class="card-sub text-muted" id="phonepeTxns"></div></div>
+      <div><span class="text-blue" style="font-size:0.7rem;font-weight:700">CC</span><div style="font-size:1.3rem;font-weight:800" id="ccAmt">--</div><div class="card-sub text-muted" id="ccTxns"></div></div>
     </div>
     <div class="card-sub" id="settlementDate"></div>
   </div>
@@ -442,10 +442,16 @@ async function loadTanker() {
 }
 
 async function loadSettlements() {
-  const phonepe = await query('settlements', 'source=eq.PHONEPE&order=date.desc&limit=1');
-  const cc = await query('settlements', 'source=eq.CC&order=date.desc&limit=1');
-  if (phonepe.length) document.getElementById('phonepeAmt').textContent = fmtR(phonepe[0].amount);
-  if (cc.length) document.getElementById('ccAmt').textContent = fmtR(cc[0].amount);
+  const phonepe = await query('settlements', 'source=ilike.phonepe&order=date.desc&limit=1');
+  const cc = await query('settlements', 'source=ilike.*cc*&order=date.desc&limit=1');
+  if (phonepe.length) {
+    document.getElementById('phonepeAmt').textContent = fmtR(phonepe[0].amount);
+    if (phonepe[0].transactions) document.getElementById('phonepeTxns').textContent = phonepe[0].transactions + ' txns';
+  }
+  if (cc.length) {
+    document.getElementById('ccAmt').textContent = fmtR(cc[0].amount);
+    if (cc[0].transactions) document.getElementById('ccTxns').textContent = cc[0].transactions + ' txns';
+  }
   const dates = [];
   if (phonepe.length) dates.push('PhonePe: ' + fmtDate(phonepe[0].date));
   if (cc.length) dates.push('CC: ' + fmtDate(cc[0].date));
