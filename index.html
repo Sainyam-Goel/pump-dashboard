@@ -150,20 +150,17 @@ if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginO
     <div class="card-title" style="color:var(--diesel)">HSD Sale (Diesel)</div>
     <div class="stat-pair"><div class="card-value" id="hsdLiters">--</div></div>
     <div class="card-sub" id="hsdIncome"></div>
-    <div class="card-sub text-muted" id="hsdDate"></div>
   </div>
   <div class="card glow-card" style="--glow-color: var(--glow-petrol)">
     <div class="card-icon">&#x26FD;&#x1F697;</div>
     <div class="card-title" style="color:var(--petrol)">MS Sale (Petrol)</div>
     <div class="stat-pair"><div class="card-value" id="msLiters">--</div></div>
     <div class="card-sub" id="msIncome"></div>
-    <div class="card-sub text-muted" id="msDate"></div>
   </div>
   <div class="card glow-card" style="--glow-color: var(--glow-green)">
     <div class="card-icon">&#x1F4B2;</div>
     <div class="card-title">Total Revenue</div>
     <div class="card-value" id="totalIncome">--</div>
-    <div class="card-sub" id="incomeDate"></div>
   </div>
 </div>
 
@@ -364,12 +361,9 @@ async function loadSales() {
 
   document.getElementById('hsdLiters').textContent = fmt(Math.round(s.hsd_total_l)) + ' L';
   document.getElementById('hsdIncome').textContent = fmtR(Math.round(s.hsd_total_amt));
-  document.getElementById('hsdDate').textContent = fmtDate(shiftDate);
   document.getElementById('msLiters').textContent = fmt(Math.round(s.ms_total_l)) + ' L';
   document.getElementById('msIncome').textContent = fmtR(Math.round(s.ms_total_amt));
-  document.getElementById('msDate').textContent = fmtDate(shiftDate);
   document.getElementById('totalIncome').textContent = fmtR(Math.round(s.hsd_total_amt + s.ms_total_amt));
-  document.getElementById('incomeDate').textContent = fmtDate(shiftDate);
 }
 
 async function loadCashCredits() {
