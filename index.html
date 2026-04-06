@@ -122,7 +122,7 @@ if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginO
     <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/a/a3/Indian_Oil_Logo.svg/200px-Indian_Oil_Logo.svg.png" alt="IOCL" style="height:44px" onerror="this.style.display='none'">
     <div>
       <h1>Bansiwala Filling Station</h1>
-      <div class="subtitle">Nagla, Karnal &bull; IOCL Dealer Code 171254 &bull; <span id="lastUpdated">Loading...</span></div>
+      <div class="subtitle">Nagla, Karnal &bull; IOCL Dealer Code 171254 &bull; <span id="lastUpdated">Loading...</span> &bull; <span id="irasFreshness" style="display:none"></span></div>
     </div>
   </div>
   <div style="text-align:right">
@@ -242,6 +242,32 @@ if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginO
 <div class="card">
   <div class="nozzle-grid" id="nozzleGrid">
     <div class="loading">Loading nozzle data...</div>
+  </div>
+</div>
+
+<!-- Testing Fuel -->
+<div id="testingFuelSection" style="margin-top:14px;display:none">
+  <div class="card" style="background:#1a1520;border-color:#2d1f3d">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <span style="font-size:1.1rem">&#x1F9EA;</span>
+      <span class="card-title" style="margin-bottom:0;color:#a78bfa">Testing Fuel</span>
+      <span class="text-muted" style="font-size:0.72rem;font-weight:500" id="testingDate"></span>
+    </div>
+    <div style="display:flex;gap:28px">
+      <div>
+        <span style="font-size:0.65rem;font-weight:700;color:var(--diesel)">HSD</span>
+        <div style="font-size:1.15rem;font-weight:800" id="testingHSD">--</div>
+      </div>
+      <div>
+        <span style="font-size:0.65rem;font-weight:700;color:var(--petrol)">MS</span>
+        <div style="font-size:1.15rem;font-weight:800" id="testingMS">--</div>
+      </div>
+      <div>
+        <span style="font-size:0.65rem;font-weight:700;color:var(--muted)">Total</span>
+        <div style="font-size:1.15rem;font-weight:800" id="testingTotal">--</div>
+      </div>
+    </div>
+    <div class="card-sub text-muted" id="testingDetail"></div>
   </div>
 </div>
 
@@ -487,6 +513,47 @@ async function loadCredits() {
   document.getElementById('creditBody').innerHTML = html;
 }
 
+async function loadIrasFreshness() {
+  try {
+    const rows = await query('nozzle_receipts', 'order=date.desc&limit=1&select=date');
+    const el = document.getElementById('irasFreshness');
+    if (!rows.length) { el.style.display = 'inline'; el.innerHTML = '<span style="color:var(--red)">IRAS: No data</span>'; return; }
+    const lastDate = rows[0].date;
+    const today = new Date().toISOString().slice(0, 10);
+    const diffDays = Math.floor((new Date(today) - new Date(lastDate)) / 86400000);
+    const dotColor = diffDays <= 1 ? 'var(--green)' : diffDays <= 3 ? 'var(--orange)' : 'var(--red)';
+    const label = diffDays === 0 ? 'today' : diffDays === 1 ? '1d ago' : diffDays + 'd ago';
+    el.style.display = 'inline';
+    el.innerHTML = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${dotColor};margin-right:4px;vertical-align:middle;box-shadow:0 0 6px ${dotColor}"></span>IRAS: ${fmtDate(lastDate)} (${label})`;
+  } catch (e) { console.error('Freshness check failed:', e); }
+}
+
+async function loadTestingFuel() {
+  try {
+    const rows = await query('testing_fuel', 'order=date.desc&limit=8');
+    if (!rows.length) return;
+    const latestDate = rows[0].date;
+    const todayRows = rows.filter(r => r.date === latestDate);
+    if (!todayRows.length) return;
+
+    let hsd = 0, ms = 0;
+    const nozzleDetail = [];
+    todayRows.forEach(r => {
+      const litres = Number(r.litres) || 0;
+      if (r.nozzle_id === 'NOZ11' || r.nozzle_id === 'NOZ15') { hsd += litres; }
+      else { ms += litres; }
+      nozzleDetail.push(`${r.nozzle_id}: ${litres}L`);
+    });
+
+    document.getElementById('testingHSD').textContent = hsd + ' L';
+    document.getElementById('testingMS').textContent = ms + ' L';
+    document.getElementById('testingTotal').textContent = (hsd + ms) + ' L';
+    document.getElementById('testingDate').textContent = fmtDate(latestDate);
+    document.getElementById('testingDetail').textContent = nozzleDetail.join(' | ');
+    document.getElementById('testingFuelSection').style.display = 'block';
+  } catch (e) { console.error('Testing fuel load failed:', e); }
+}
+
 async function loadSalesData() {
   allLedgerData = await query('daily_ledger', 'order=date.asc&select=date,hsd_sale_liters,ms_sale_liters,hsd_income,ms_income,total_income');
   renderChart('daily');
@@ -575,6 +642,8 @@ async function loadAll() {
     loadNozzles(),
     loadCredits(),
     loadSalesData(),
+    loadIrasFreshness(),
+    loadTestingFuel(),
   ]);
 }
 
