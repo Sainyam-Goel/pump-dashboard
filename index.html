@@ -340,12 +340,11 @@ async function query(table, params = '') {
 
 async function loadSales() {
   // Sales & revenue from IRAS — shift-based (9AM→9AM, matches hand ledger)
-  // Get the second-latest date as shift_date (yesterday = last complete shift)
+  // shift_date = ledger date (end of shift). Apr 6 = Apr 5 9AM → Apr 6 9AM.
+  // Use latest date in iras_transactions as shift_date (that shift is complete by 9:30 AM scrape)
   const dateRows = await query('iras_transactions', 'order=date.desc&limit=1&select=date');
   if (!dateRows.length) return;
-  const latest = dateRows[0].date;
-  const prev = await query('iras_transactions', `date=lt.${latest}&order=date.desc&limit=1&select=date`);
-  const shiftDate = prev.length ? prev[0].date : latest;
+  const shiftDate = dateRows[0].date;
 
   const res = await fetch(`${SUPABASE_URL}/rpc/iss_shift_summary`, {
     method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' },
@@ -611,9 +610,7 @@ async function loadIssActivity() {
   try {
     const dateRows = await query('iras_transactions', 'order=date.desc&limit=1&select=date');
     if (!dateRows.length) return;
-    const latest = dateRows[0].date;
-    const prev = await query('iras_transactions', `date=lt.${latest}&order=date.desc&limit=1&select=date`);
-    const latestDate = prev.length ? prev[0].date : latest;
+    const latestDate = dateRows[0].date;
 
     const res = await fetch(`${SUPABASE_URL}/rpc/iss_shift_summary`, {
       method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' },
