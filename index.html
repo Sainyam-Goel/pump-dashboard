@@ -338,12 +338,14 @@ async function query(table, params = '') {
 }
 
 async function loadSales() {
-  // Sales & revenue from IRAS — shift-based (9AM→9AM, matches hand ledger)
+  // Sales & revenue from IRAS — shift-based (9AM→9AM)
   // shift_date = ledger date (end of shift). Apr 6 = Apr 5 9AM → Apr 6 9AM.
-  // Use latest date in iras_transactions as shift_date (that shift is complete by 9:30 AM scrape)
-  const dateRows = await query('iras_transactions', 'order=date.desc&limit=1&select=date');
+  // Use latest date if it's yesterday or older; fall back to second-latest if latest is today
+  const dateRows = await query('iras_transactions', 'order=date.desc&limit=2&select=date');
   if (!dateRows.length) return;
-  const shiftDate = dateRows[0].date;
+  const latest = dateRows[0].date;
+  const todayISO = new Date().toLocaleDateString('en-CA');
+  const shiftDate = (latest === todayISO && dateRows.length > 1) ? dateRows[1].date : latest;
 
   const res = await fetch(`${SUPABASE_URL}/rpc/iss_shift_summary`, {
     method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' },
@@ -353,7 +355,6 @@ async function loadSales() {
   if (!data || !data.stats) return;
   const s = data.stats;
 
-  // Shift period label: "5 Apr 9AM — 6 Apr 9AM"
   const prevDay = new Date(shiftDate + 'T00:00:00');
   prevDay.setDate(prevDay.getDate() - 1);
   const prevISO = prevDay.toISOString().slice(0, 10);
@@ -610,9 +611,11 @@ async function loadTestingFuel() {
 
 async function loadIssActivity() {
   try {
-    const dateRows = await query('iras_transactions', 'order=date.desc&limit=1&select=date');
+    const dateRows = await query('iras_transactions', 'order=date.desc&limit=2&select=date');
     if (!dateRows.length) return;
-    const latestDate = dateRows[0].date;
+    const latest = dateRows[0].date;
+    const todayISO = new Date().toLocaleDateString('en-CA');
+    const latestDate = (latest === todayISO && dateRows.length > 1) ? dateRows[1].date : latest;
 
     const res = await fetch(`${SUPABASE_URL}/rpc/iss_shift_summary`, {
       method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' },
@@ -648,8 +651,11 @@ async function loadSalesData() {
   });
   const data = await res.json();
   if (!data || !data.length) return;
-  // Exclude last entry (today's incomplete shift)
-  const complete = data.slice(0, -1);
+  // Exclude today's incomplete shift (shift_date = tomorrow)
+  const todayISO = new Date().toLocaleDateString('en-CA');
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowISO = tomorrow.toLocaleDateString('en-CA');
+  const complete = data.filter((d: any) => d.shift_date !== todayISO && d.shift_date !== tomorrowISO);
   allLedgerData = complete.map(d => ({
     date: d.shift_date,
     hsd_sale_liters: d.hsd_liters,
