@@ -339,14 +339,17 @@ async function query(table, params = '') {
 }
 
 async function loadSales() {
-  // Sales & revenue from IRAS transactions (always fresh)
-  const dateRow = await query('iras_transactions', 'order=date.desc&limit=1&select=date');
-  if (!dateRow.length) return;
-  const latestDate = dateRow[0].date;
+  // Sales & revenue from IRAS — yesterday's full day (today is always incomplete)
+  const dateRows = await query('iras_transactions', 'order=date.desc&limit=1&select=date');
+  if (!dateRows.length) return;
+  // Get second-latest date (yesterday = last complete day)
+  const latestDate = dateRows[0].date;
+  const distinctDates = await query('iras_transactions', `date=lt.${latestDate}&order=date.desc&limit=1&select=date`);
+  const targetDate = distinctDates.length ? distinctDates[0].date : latestDate;
 
   const res = await fetch(`${SUPABASE_URL}/rpc/iss_daily_summary`, {
     method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ target_date: latestDate })
+    body: JSON.stringify({ target_date: targetDate })
   });
   const data = await res.json();
   if (!data || !data.stats) return;
@@ -354,12 +357,12 @@ async function loadSales() {
 
   document.getElementById('hsdLiters').textContent = fmt(Math.round(s.hsd_total_l)) + ' L';
   document.getElementById('hsdIncome').textContent = fmtR(Math.round(s.hsd_total_amt));
-  document.getElementById('hsdDate').textContent = fmtDate(latestDate);
+  document.getElementById('hsdDate').textContent = fmtDate(targetDate);
   document.getElementById('msLiters').textContent = fmt(Math.round(s.ms_total_l)) + ' L';
   document.getElementById('msIncome').textContent = fmtR(Math.round(s.ms_total_amt));
-  document.getElementById('msDate').textContent = fmtDate(latestDate);
+  document.getElementById('msDate').textContent = fmtDate(targetDate);
   document.getElementById('totalIncome').textContent = fmtR(Math.round(s.hsd_total_amt + s.ms_total_amt));
-  document.getElementById('incomeDate').textContent = fmtDate(latestDate) + ' (IRAS)';
+  document.getElementById('incomeDate').textContent = fmtDate(targetDate) + ' (IRAS)';
 }
 
 async function loadCashCredits() {
@@ -606,9 +609,11 @@ async function loadTestingFuel() {
 
 async function loadIssActivity() {
   try {
-    const dateRow = await query('iras_transactions', 'order=date.desc&limit=1&select=date');
-    if (!dateRow.length) return;
-    const latestDate = dateRow[0].date;
+    const dateRows = await query('iras_transactions', 'order=date.desc&limit=1&select=date');
+    if (!dateRows.length) return;
+    const latest = dateRows[0].date;
+    const distinctDates = await query('iras_transactions', `date=lt.${latest}&order=date.desc&limit=1&select=date`);
+    const latestDate = distinctDates.length ? distinctDates[0].date : latest;
 
     const res = await fetch(`${SUPABASE_URL}/rpc/iss_daily_summary`, {
       method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' },
