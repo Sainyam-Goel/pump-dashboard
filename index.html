@@ -463,10 +463,10 @@ async function loadNozzles() {
   const yesterday = byDate[dates[1]] || {};
 
   const nozzles = [
-    { id: 'NOZ11', label: 'HSD 1 (Pump 1)', color: 'var(--diesel)' },
-    { id: 'NOZ15', label: 'HSD 2 (Pump 3)', color: 'var(--diesel)' },
-    { id: 'NOZ10', label: 'MS 1 (Pump 2)', color: 'var(--petrol)' },
-    { id: 'NOZ14', label: 'MS 2 (Pump 4)', color: 'var(--petrol)' },
+    { id: 'NOZ11', label: 'HSD 1 (Road)', color: 'var(--diesel)' },
+    { id: 'NOZ15', label: 'HSD 2 (Office)', color: 'var(--diesel)' },
+    { id: 'NOZ10', label: 'MS 1 (Road)', color: 'var(--petrol)' },
+    { id: 'NOZ14', label: 'MS 2 (Office)', color: 'var(--petrol)' },
   ];
 
   const ledgerRows = await query('daily_ledger', 'order=date.desc&limit=2&select=date,noz11_reading,noz15_reading,noz10_reading,noz14_reading');
