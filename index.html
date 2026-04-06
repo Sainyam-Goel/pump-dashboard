@@ -659,7 +659,7 @@ async function loadSalesData() {
   const todayISO = new Date().toLocaleDateString('en-CA');
   const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowISO = tomorrow.toLocaleDateString('en-CA');
-  const complete = data.filter((d: any) => d.shift_date !== todayISO && d.shift_date !== tomorrowISO);
+  const complete = data.filter(d => d.shift_date !== todayISO && d.shift_date !== tomorrowISO);
   allLedgerData = complete.map(d => ({
     date: d.shift_date,
     hsd_sale_liters: d.hsd_liters,
