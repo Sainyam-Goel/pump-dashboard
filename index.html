@@ -515,7 +515,7 @@ async function loadCredits() {
 
 async function loadIrasFreshness() {
   try {
-    const rows = await query('nozzle_receipts', 'order=date.desc&limit=1&select=date');
+    const rows = await query('nozzle_receipts', 'order=date.desc&limit=1&select=date,time_str,created_at');
     const el = document.getElementById('irasFreshness');
     if (!rows.length) { el.style.display = 'inline'; el.innerHTML = '<span style="color:var(--red)">IRAS: No data</span>'; return; }
     const lastDate = rows[0].date;
@@ -523,8 +523,14 @@ async function loadIrasFreshness() {
     const diffDays = Math.floor((new Date(today) - new Date(lastDate)) / 86400000);
     const dotColor = diffDays <= 1 ? 'var(--green)' : diffDays <= 3 ? 'var(--orange)' : 'var(--red)';
     const label = diffDays === 0 ? 'today' : diffDays === 1 ? '1d ago' : diffDays + 'd ago';
+    // Show when the scraper actually ran (created_at) converted to IST
+    let runTime = '';
+    if (rows[0].created_at) {
+      const dt = new Date(rows[0].created_at);
+      runTime = ' at ' + dt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+    }
     el.style.display = 'inline';
-    el.innerHTML = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${dotColor};margin-right:4px;vertical-align:middle;box-shadow:0 0 6px ${dotColor}"></span>IRAS: ${fmtDate(lastDate)} (${label})`;
+    el.innerHTML = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${dotColor};margin-right:4px;vertical-align:middle;box-shadow:0 0 6px ${dotColor}"></span>IRAS: ${fmtDate(lastDate)}${runTime} (${label})`;
   } catch (e) { console.error('Freshness check failed:', e); }
 }
 
