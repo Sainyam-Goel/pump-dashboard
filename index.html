@@ -302,16 +302,6 @@ if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginO
     <div class="card-sub text-muted" id="issAvgMsL"></div>
   </div>
 </div>
-<div class="grid grid-2">
-  <div class="card" style="padding:14px">
-    <div class="card-title" style="color:var(--diesel);margin-bottom:4px">HSD &mdash; Hourly</div>
-    <canvas id="peakHsdChart" height="100"></canvas>
-  </div>
-  <div class="card" style="padding:14px">
-    <div class="card-title" style="color:var(--petrol);margin-bottom:4px">MS &mdash; Hourly</div>
-    <canvas id="peakMsChart" height="100"></canvas>
-  </div>
-</div>
 
 <!-- Sales Trends -->
 <div class="section-title">Sales Trends</div>
@@ -593,16 +583,12 @@ async function loadTestingFuel() {
   } catch (e) { console.error('Testing fuel load failed:', e); }
 }
 
-let peakHsdChart = null, peakMsChart = null;
-
 async function loadIssActivity() {
   try {
-    // Get latest date with ISS data
     const dateRow = await query('iras_transactions', 'order=date.desc&limit=1&select=date');
     if (!dateRow.length) return;
     const latestDate = dateRow[0].date;
 
-    // Single RPC call — server-side aggregation, ~36 rows instead of 430+
     const res = await fetch(`${SUPABASE_URL}/rpc/iss_daily_summary`, {
       method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' },
       body: JSON.stringify({ target_date: latestDate })
@@ -626,43 +612,6 @@ async function loadIssActivity() {
       document.getElementById('issAvgMs').textContent = fmtR(Math.round(s.ms_total_amt / s.ms_txns));
       document.getElementById('issAvgMsL').textContent = (s.ms_total_l / s.ms_txns).toFixed(1) + ' L avg';
     }
-
-    // Build hourly data from pre-aggregated rows
-    const hsdH = {}, msH = {};
-    (data.hourly || []).forEach(r => {
-      if (r.product === 'HSD') hsdH[r.hour] = r;
-      else msH[r.hour] = r;
-    });
-
-    const labels = [];
-    const hsdL = [], hsdC = [], msL = [], msC = [];
-    for (let h = 5; h <= 22; h++) {
-      labels.push(h < 12 ? h + 'am' : h === 12 ? '12pm' : (h - 12) + 'pm');
-      hsdL.push(Number(hsdH[h]?.litres) || 0); hsdC.push(Number(hsdH[h]?.txns) || 0);
-      msL.push(Number(msH[h]?.litres) || 0); msC.push(Number(msH[h]?.txns) || 0);
-    }
-
-    const mkChart = (canvasId, litres, counts, bg, border) => {
-      return new Chart(document.getElementById(canvasId), {
-        type: 'bar',
-        data: { labels, datasets: [{ data: litres, backgroundColor: bg, borderColor: border, borderWidth: 1, borderRadius: 3, barPercentage: 0.7 }] },
-        options: {
-          responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
-          plugins: { legend: { display: false }, datalabels: { display: false },
-            tooltip: { callbacks: { label: ctx => ctx.raw + 'L (' + counts[ctx.dataIndex] + ' txns)' } }
-          },
-          scales: {
-            x: { ticks: { color: '#6b7194', font: { size: 8, family: 'Inter' } }, grid: { display: false } },
-            y: { ticks: { color: '#6b7194', font: { size: 8, family: 'Inter' }, callback: v => v + 'L' }, grid: { color: '#1e2133' }, beginAtZero: true }
-          }
-        }
-      });
-    };
-
-    if (peakHsdChart) peakHsdChart.destroy();
-    peakHsdChart = mkChart('peakHsdChart', hsdL, hsdC, '#4ade8044', '#4ade80');
-    if (peakMsChart) peakMsChart.destroy();
-    peakMsChart = mkChart('peakMsChart', msL, msC, '#f0b42944', '#f0b429');
   } catch (e) { console.error('ISS activity load failed:', e); }
 }
 
