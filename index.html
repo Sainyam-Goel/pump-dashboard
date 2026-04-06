@@ -338,24 +338,39 @@ async function query(table, params = '') {
   return res.json();
 }
 
-async function loadSummary() {
+async function loadSales() {
+  // Sales & revenue from IRAS transactions (always fresh)
+  const dateRow = await query('iras_transactions', 'order=date.desc&limit=1&select=date');
+  if (!dateRow.length) return;
+  const latestDate = dateRow[0].date;
+
+  const res = await fetch(`${SUPABASE_URL}/rpc/iss_daily_summary`, {
+    method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target_date: latestDate })
+  });
+  const data = await res.json();
+  if (!data || !data.stats) return;
+  const s = data.stats;
+
+  document.getElementById('hsdLiters').textContent = fmt(Math.round(s.hsd_total_l)) + ' L';
+  document.getElementById('hsdIncome').textContent = fmtR(Math.round(s.hsd_total_amt));
+  document.getElementById('hsdDate').textContent = fmtDate(latestDate);
+  document.getElementById('msLiters').textContent = fmt(Math.round(s.ms_total_l)) + ' L';
+  document.getElementById('msIncome').textContent = fmtR(Math.round(s.ms_total_amt));
+  document.getElementById('msDate').textContent = fmtDate(latestDate);
+  document.getElementById('totalIncome').textContent = fmtR(Math.round(s.hsd_total_amt + s.ms_total_amt));
+  document.getElementById('incomeDate').textContent = fmtDate(latestDate) + ' (IRAS)';
+}
+
+async function loadCashCredits() {
+  // Cash, credits, expenses from OCR/ledger
   const rows = await query('daily_ledger', 'order=date.desc&limit=2');
   if (!rows.length) return;
   const today = rows[0];
   const yesterday = rows[1] || {};
 
-  document.getElementById('hsdLiters').textContent = fmt(today.hsd_sale_liters) + ' L';
-  document.getElementById('hsdIncome').textContent = fmtR(today.hsd_income);
-  document.getElementById('hsdDate').textContent = fmtDate(today.date);
-  document.getElementById('msLiters').textContent = fmt(today.ms_sale_liters) + ' L';
-  document.getElementById('msIncome').textContent = fmtR(today.ms_income);
-  document.getElementById('msDate').textContent = fmtDate(today.date);
-  document.getElementById('totalIncome').textContent = fmtR(today.total_income);
-  document.getElementById('incomeDate').textContent = fmtDate(today.date);
-
-  // Row 2
   document.getElementById('totalCash').textContent = fmtR(today.total_cash);
-  document.getElementById('cashDate').textContent = fmtDate(today.date);
+  document.getElementById('cashDate').textContent = fmtDate(today.date) + ' (Ledger)';
   document.getElementById('creditDate').textContent = fmtDate(today.date);
   document.getElementById('expenseDate').textContent = fmtDate(today.date);
   const prevCash = Number(yesterday.total_cash) || 0;
@@ -622,7 +637,21 @@ async function loadIssActivity() {
 }
 
 async function loadSalesData() {
-  allLedgerData = await query('daily_ledger', 'order=date.asc&select=date,hsd_sale_liters,ms_sale_liters,hsd_income,ms_income,total_income');
+  // Sales trend from IRAS transactions (not OCR ledger)
+  const res = await fetch(`${SUPABASE_URL}/rpc/iss_daily_totals`, {
+    method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  const data = await res.json();
+  if (!data || !data.length) return;
+  allLedgerData = data.map(d => ({
+    date: d.date,
+    hsd_sale_liters: d.hsd_liters,
+    ms_sale_liters: d.ms_liters,
+    hsd_income: d.hsd_income,
+    ms_income: d.ms_income,
+    total_income: d.total_income
+  }));
   renderChart('daily');
 }
 
@@ -701,7 +730,8 @@ function renderChart(period) {
 
 async function loadAll() {
   await Promise.all([
-    loadSummary(),
+    loadSales(),
+    loadCashCredits(),
     loadFuelRate(),
     loadTanks(),
     loadTanker(),
