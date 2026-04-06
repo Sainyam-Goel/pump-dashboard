@@ -280,6 +280,39 @@ if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginO
   </table>
 </div>
 
+<!-- Sales Activity (from IRAS transactions) -->
+<div class="section-title">Sales Activity <span id="issDate" class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0"></span></div>
+<div class="summary-row">
+  <div class="card">
+    <div class="card-icon">&#x1F4CA;</div>
+    <div class="card-title">Transactions</div>
+    <div class="card-value" id="issTotalTxns">--</div>
+    <div class="card-sub"><span style="color:var(--diesel)" id="issHsdTxns">--</span> &bull; <span style="color:var(--petrol)" id="issMsTxns">--</span></div>
+  </div>
+  <div class="card">
+    <div class="card-icon">&#x1F3AB;</div>
+    <div class="card-title">Avg Ticket (HSD)</div>
+    <div class="card-value" style="color:var(--diesel)" id="issAvgHsd">--</div>
+    <div class="card-sub text-muted" id="issAvgHsdL"></div>
+  </div>
+  <div class="card">
+    <div class="card-icon">&#x1F3AB;</div>
+    <div class="card-title">Avg Ticket (MS)</div>
+    <div class="card-value" style="color:var(--petrol)" id="issAvgMs">--</div>
+    <div class="card-sub text-muted" id="issAvgMsL"></div>
+  </div>
+</div>
+<div class="grid grid-2">
+  <div class="card">
+    <div class="card-title" style="color:var(--diesel)">HSD &mdash; Hourly Sales</div>
+    <canvas id="peakHsdChart" height="160"></canvas>
+  </div>
+  <div class="card">
+    <div class="card-title" style="color:var(--petrol)">MS &mdash; Hourly Sales</div>
+    <canvas id="peakMsChart" height="160"></canvas>
+  </div>
+</div>
+
 <!-- Sales Trends -->
 <div class="section-title">Sales Trends</div>
 <div class="tab-row">
@@ -560,6 +593,114 @@ async function loadTestingFuel() {
   } catch (e) { console.error('Testing fuel load failed:', e); }
 }
 
+let peakHsdChart = null, peakMsChart = null;
+
+async function loadIssActivity() {
+  try {
+    const rows = await query('iras_transactions', 'order=date.desc&limit=1&select=date');
+    if (!rows.length) return;
+    const latestDate = rows[0].date;
+    const txns = await query('iras_transactions', `date=eq.${latestDate}&select=product,quantity,amount,time_str,payment_code&order=time_str.asc`);
+    if (!txns.length) return;
+
+    // Filter out testing fuel (payment_code 102)
+    const sales = txns.filter(r => r.payment_code !== '102');
+    const hsd = sales.filter(r => r.product === 'HSD');
+    const ms = sales.filter(r => r.product === 'MS');
+
+    document.getElementById('issDate').textContent = '\u2014 ' + fmtDate(latestDate);
+    document.getElementById('issTotalTxns').textContent = sales.length;
+    document.getElementById('issHsdTxns').textContent = 'HSD: ' + hsd.length;
+    document.getElementById('issMsTxns').textContent = 'MS: ' + ms.length;
+
+    // Avg ticket
+    if (hsd.length) {
+      const avgAmt = hsd.reduce((s, r) => s + Number(r.amount), 0) / hsd.length;
+      const avgL = hsd.reduce((s, r) => s + Number(r.quantity), 0) / hsd.length;
+      document.getElementById('issAvgHsd').textContent = fmtR(Math.round(avgAmt));
+      document.getElementById('issAvgHsdL').textContent = avgL.toFixed(1) + ' L avg';
+    }
+    if (ms.length) {
+      const avgAmt = ms.reduce((s, r) => s + Number(r.amount), 0) / ms.length;
+      const avgL = ms.reduce((s, r) => s + Number(r.quantity), 0) / ms.length;
+      document.getElementById('issAvgMs').textContent = fmtR(Math.round(avgAmt));
+      document.getElementById('issAvgMsL').textContent = avgL.toFixed(1) + ' L avg';
+    }
+
+    // Peak hours — bucket by hour
+    function buildHourly(data) {
+      const hours = Array(24).fill(0);
+      const counts = Array(24).fill(0);
+      data.forEach(r => {
+        if (!r.time_str) return;
+        const h = parseInt(r.time_str.split(':')[0]);
+        if (h >= 0 && h < 24) { hours[h] += Number(r.quantity); counts[h]++; }
+      });
+      // Only show hours 5-23 (pump operating hours)
+      const labels = [], litres = [], txnCounts = [];
+      for (let h = 5; h <= 22; h++) {
+        labels.push(h < 12 ? h + 'am' : h === 12 ? '12pm' : (h - 12) + 'pm');
+        litres.push(Math.round(hours[h] * 10) / 10);
+        txnCounts.push(counts[h]);
+      }
+      return { labels, litres, txnCounts };
+    }
+
+    const hsdHourly = buildHourly(hsd);
+    const msHourly = buildHourly(ms);
+
+    const chartOpts = (color, borderColor) => ({
+      type: 'bar',
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, datalabels: { display: false } },
+        scales: {
+          x: { ticks: { color: '#6b7194', font: { size: 9, family: 'Inter' } }, grid: { display: false } },
+          y: { ticks: { color: '#6b7194', font: { size: 9, family: 'Inter' }, callback: v => v + 'L' }, grid: { color: '#1e2133' } }
+        }
+      }
+    });
+
+    if (peakHsdChart) peakHsdChart.destroy();
+    peakHsdChart = new Chart(document.getElementById('peakHsdChart'), {
+      ...chartOpts(),
+      data: {
+        labels: hsdHourly.labels,
+        datasets: [{ data: hsdHourly.litres, backgroundColor: '#4ade8044', borderColor: '#4ade80', borderWidth: 1, borderRadius: 4 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, datalabels: { display: false },
+          tooltip: { callbacks: { label: (ctx) => ctx.raw + 'L (' + hsdHourly.txnCounts[ctx.dataIndex] + ' txns)' } }
+        },
+        scales: {
+          x: { ticks: { color: '#6b7194', font: { size: 9, family: 'Inter' } }, grid: { display: false } },
+          y: { ticks: { color: '#6b7194', font: { size: 9, family: 'Inter' }, callback: v => v + 'L' }, grid: { color: '#1e2133' } }
+        }
+      }
+    });
+
+    if (peakMsChart) peakMsChart.destroy();
+    peakMsChart = new Chart(document.getElementById('peakMsChart'), {
+      ...chartOpts(),
+      data: {
+        labels: msHourly.labels,
+        datasets: [{ data: msHourly.litres, backgroundColor: '#f0b42944', borderColor: '#f0b429', borderWidth: 1, borderRadius: 4 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, datalabels: { display: false },
+          tooltip: { callbacks: { label: (ctx) => ctx.raw + 'L (' + msHourly.txnCounts[ctx.dataIndex] + ' txns)' } }
+        },
+        scales: {
+          x: { ticks: { color: '#6b7194', font: { size: 9, family: 'Inter' } }, grid: { display: false } },
+          y: { ticks: { color: '#6b7194', font: { size: 9, family: 'Inter' }, callback: v => v + 'L' }, grid: { color: '#1e2133' } }
+        }
+      }
+    });
+  } catch (e) { console.error('ISS activity load failed:', e); }
+}
+
 async function loadSalesData() {
   allLedgerData = await query('daily_ledger', 'order=date.asc&select=date,hsd_sale_liters,ms_sale_liters,hsd_income,ms_income,total_income');
   renderChart('daily');
@@ -650,6 +791,7 @@ async function loadAll() {
     loadSalesData(),
     loadIrasFreshness(),
     loadTestingFuel(),
+    loadIssActivity(),
   ]);
 }
 
