@@ -608,21 +608,11 @@ async function loadIrasFreshness() {
 
 async function loadTestingFuel() {
   try {
-    // Use same shift date as financials (yesterday 6AM → today 6AM)
-    const dateRows = await query('iras_transactions', 'order=date.desc&limit=2&select=date');
-    if (!dateRows.length) return;
-    const latest = dateRows[0].date;
+    // Testing fuel: simple calendar day (midnight to midnight)
     const todayISO = new Date().toLocaleDateString('en-CA');
-    const shiftDate = (latest === todayISO && dateRows.length > 1) ? dateRows[1].date : latest;
-    const prevDay = new Date(shiftDate + 'T12:00:00');
-    prevDay.setDate(prevDay.getDate() - 1);
-    const prevISO = prevDay.getFullYear() + '-' + String(prevDay.getMonth()+1).padStart(2,'0') + '-' + String(prevDay.getDate()).padStart(2,'0');
 
-    // Query testing transactions (payment_code=102) for the shift period
-    const shiftRows = [
-      ...await query('iras_transactions', `date=eq.${prevISO}&time_str=gte.06:00&payment_code=eq.102&select=nozzle_no,product,quantity,date,time_str`),
-      ...await query('iras_transactions', `date=eq.${shiftDate}&time_str=lt.06:00&payment_code=eq.102&select=nozzle_no,product,quantity,date,time_str`),
-    ];
+    // Query testing transactions (payment_code=102) for today
+    const shiftRows = await query('iras_transactions', `date=eq.${todayISO}&payment_code=eq.102&select=nozzle_no,product,quantity,date,time_str`);
     if (!shiftRows.length) return;
 
     let hsd = 0, ms = 0, lastTime = '';
@@ -641,7 +631,7 @@ async function loadTestingFuel() {
     document.getElementById('testingHSD').textContent = hsd + ' L';
     document.getElementById('testingMS').textContent = ms + ' L';
     document.getElementById('testingTotal').textContent = (hsd + ms) + ' L';
-    document.getElementById('testingDate').textContent = fmtDate(prevISO) + ' 6AM \u2192 ' + fmtDate(shiftDate) + ' 6AM';
+    document.getElementById('testingDate').textContent = fmtDate(todayISO);
     document.getElementById('testingDetail').textContent = nozzleDetail.join(' | ') + (lastTestLabel ? '  ·  ' + lastTestLabel : '');
     document.getElementById('testingFuelSection').style.display = 'block';
   } catch (e) { console.error('Testing fuel load failed:', e); }
