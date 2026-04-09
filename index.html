@@ -224,7 +224,7 @@ if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginO
 </div>
 
 <!-- Last Tanker -->
-<div class="grid grid-2" style="margin-top:14px">
+<div class="grid grid-2" style="margin-top:-2px">
   <div class="card">
     <div class="card-icon">&#x1F69A;</div>
     <div class="card-title">Last Tanker Delivery</div>
@@ -234,23 +234,6 @@ if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginO
     </div>
     <div class="card-sub" id="tankerDate"></div>
   </div>
-</div>
-
-<!-- Fuel Audit -->
-<div class="section-title">Fuel Audit (Totalizer vs Tank Drop)</div>
-<div class="card" style="padding:0;overflow-x:auto;border-radius:14px">
-  <table id="auditTable">
-    <thead><tr>
-      <th>Date</th>
-      <th style="text-align:right">HSD Meter</th>
-      <th style="text-align:right">HSD Tank</th>
-      <th style="text-align:right">HSD Gap</th>
-      <th style="text-align:right">MS Meter</th>
-      <th style="text-align:right">MS Tank</th>
-      <th style="text-align:right">MS Gap</th>
-    </tr></thead>
-    <tbody id="auditBody"><tr><td colspan="7" class="loading">Loading...</td></tr></tbody>
-  </table>
 </div>
 
 <!-- Nozzle Readings -->
@@ -497,44 +480,6 @@ async function loadTanker() {
   }
 }
 
-async function loadAudit() {
-  try {
-    const res = await fetch(`${SUPABASE_URL}/rpc/fuel_reconciliation`, {
-      method: 'POST',
-      headers: { ...HEADERS, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ days_back: 10 })
-    });
-    const raw = await res.json();
-    // RPC returns [{fuel_reconciliation: [...]}] — extract the array
-    const rows = Array.isArray(raw) && raw[0]?.fuel_reconciliation ? raw[0].fuel_reconciliation : (Array.isArray(raw) ? raw : []);
-    if (!rows.length) { document.getElementById('auditBody').innerHTML = '<tr><td colspan="7" class="loading">No audit data</td></tr>'; return; }
-
-    let html = '';
-    rows.forEach(r => {
-      const hsdGapCls = r.hsd_gap == null ? 'text-muted' : (Math.abs(r.hsd_gap) <= 50 ? 'text-green' : (Math.abs(r.hsd_gap) <= 150 ? 'text-orange' : 'text-red'));
-      const msGapCls = r.ms_gap == null ? 'text-muted' : (Math.abs(r.ms_gap) <= 50 ? 'text-green' : (Math.abs(r.ms_gap) <= 150 ? 'text-orange' : 'text-red'));
-      const tankerBadge = r.tanker_day ? ' <span class="badge badge-blue">Tanker</span>' : '';
-      const hsdTank = r.hsd_tank_drop == null ? '--' : fmt(Math.round(r.hsd_tank_drop));
-      const hsdGap = r.hsd_gap == null ? '--' : (r.hsd_gap > 0 ? '+' : '') + fmt(Math.round(r.hsd_gap));
-      const msTank = r.ms_tank_drop == null ? '--' : fmt(Math.round(r.ms_tank_drop));
-      const msGap = r.ms_gap == null ? '--' : (r.ms_gap > 0 ? '+' : '') + fmt(Math.round(r.ms_gap));
-
-      html += `<tr>
-        <td>${fmtDate(r.shift_date)}${tankerBadge}</td>
-        <td style="text-align:right">${fmt(Math.round(r.hsd_totalizer))}L</td>
-        <td style="text-align:right">${hsdTank !== '--' ? hsdTank + 'L' : '--'}</td>
-        <td style="text-align:right" class="${hsdGapCls}">${hsdGap !== '--' ? hsdGap + 'L' : '--'}</td>
-        <td style="text-align:right">${fmt(Math.round(r.ms_totalizer))}L</td>
-        <td style="text-align:right">${msTank !== '--' ? msTank + 'L' : '--'}</td>
-        <td style="text-align:right" class="${msGapCls}">${msGap !== '--' ? msGap + 'L' : '--'}</td>
-      </tr>`;
-    });
-    document.getElementById('auditBody').innerHTML = html;
-  } catch (e) {
-    document.getElementById('auditBody').innerHTML = '<tr><td colspan="7" class="loading">Failed to load audit</td></tr>';
-  }
-}
-
 async function loadSettlements() {
   const phonepe = await query('settlements', 'source=ilike.phonepe&order=date.desc&limit=1');
   const cc = await query('settlements', 'source=ilike.*cc*&order=date.desc&limit=1');
@@ -663,7 +608,7 @@ async function loadIrasFreshness() {
 
 async function loadTestingFuel() {
   try {
-    // Use same shift date as financials (yesterday 9AM → today 9AM)
+    // Use same shift date as financials (yesterday 6AM → today 6AM)
     const dateRows = await query('iras_transactions', 'order=date.desc&limit=2&select=date');
     if (!dateRows.length) return;
     const latest = dateRows[0].date;
@@ -675,26 +620,29 @@ async function loadTestingFuel() {
 
     // Query testing transactions (payment_code=102) for the shift period
     const shiftRows = [
-      ...await query('iras_transactions', `date=eq.${prevISO}&time_str=gte.09:00&payment_code=eq.102&select=nozzle_no,product,quantity`),
-      ...await query('iras_transactions', `date=eq.${shiftDate}&time_str=lt.09:00&payment_code=eq.102&select=nozzle_no,product,quantity`),
+      ...await query('iras_transactions', `date=eq.${prevISO}&time_str=gte.06:00&payment_code=eq.102&select=nozzle_no,product,quantity,date,time_str`),
+      ...await query('iras_transactions', `date=eq.${shiftDate}&time_str=lt.06:00&payment_code=eq.102&select=nozzle_no,product,quantity,date,time_str`),
     ];
     if (!shiftRows.length) return;
 
-    let hsd = 0, ms = 0;
+    let hsd = 0, ms = 0, lastTime = '';
     const nozzleMap = {};
     shiftRows.forEach(r => {
       const litres = Number(r.quantity) || 0;
       const nid = 'NOZ' + r.nozzle_no;
       nozzleMap[nid] = (nozzleMap[nid] || 0) + litres;
       if (r.product === 'HSD') { hsd += litres; } else { ms += litres; }
+      const ts = r.date + 'T' + r.time_str;
+      if (ts > lastTime) lastTime = ts;
     });
+    const lastTestLabel = lastTime ? 'Last: ' + fmtDate(lastTime.slice(0,10)) + ' ' + lastTime.slice(11,16) : '';
     const nozzleDetail = Object.entries(nozzleMap).map(([k, v]) => `${k}: ${v}L`);
 
     document.getElementById('testingHSD').textContent = hsd + ' L';
     document.getElementById('testingMS').textContent = ms + ' L';
     document.getElementById('testingTotal').textContent = (hsd + ms) + ' L';
-    document.getElementById('testingDate').textContent = fmtDate(prevISO) + ' 9AM \u2192 ' + fmtDate(shiftDate) + ' 9AM';
-    document.getElementById('testingDetail').textContent = nozzleDetail.join(' | ');
+    document.getElementById('testingDate').textContent = fmtDate(prevISO) + ' 6AM \u2192 ' + fmtDate(shiftDate) + ' 6AM';
+    document.getElementById('testingDetail').textContent = nozzleDetail.join(' | ') + (lastTestLabel ? '  ·  ' + lastTestLabel : '');
     document.getElementById('testingFuelSection').style.display = 'block';
   } catch (e) { console.error('Testing fuel load failed:', e); }
 }
