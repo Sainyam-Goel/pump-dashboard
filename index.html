@@ -223,6 +223,18 @@ if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginO
   </div>
 </div>
 
+<div class="card" style="margin-top:10px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <div class="card-title" style="margin:0">30-min Tank Levels <span class="text-muted" id="tankChartRange" style="font-size:0.7rem;font-weight:500;text-transform:none;letter-spacing:0"></span></div>
+    <div class="tab-row" style="margin:0">
+      <button class="tab active" onclick="setTankChartRange(1,this)">24h</button>
+      <button class="tab" onclick="setTankChartRange(2,this)">48h</button>
+      <button class="tab" onclick="setTankChartRange(7,this)">7d</button>
+    </div>
+  </div>
+  <canvas id="tankChart" height="240"></canvas>
+</div>
+
 <!-- Last Tanker -->
 <div class="grid grid-2" style="margin-top:-2px">
   <div class="card">
@@ -344,6 +356,8 @@ const TANK_CAPACITY = 20000;
 const LOW_FUEL = 3000;
 
 let salesChart = null;
+let tankChart = null;
+let tankChartDays = 1;
 let allLedgerData = [];
 
 function fmt(n) { return n == null ? '--' : Number(n).toLocaleString('en-IN'); }
@@ -449,6 +463,99 @@ async function loadTanks() {
   } else {
     warnEl.style.display = 'none';
   }
+}
+
+function setTankChartRange(days, btn) {
+  tankChartDays = days;
+  document.querySelectorAll('#tankChart').forEach(()=>{});
+  if (btn) {
+    btn.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  loadTankChart();
+}
+
+async function loadTankChart() {
+  // Fetch enough days to cover the requested window. Add 1 day buffer for crossing midnight.
+  const today = new Date();
+  const start = new Date(today.getTime() - tankChartDays * 86400000);
+  const startDate = start.toISOString().slice(0, 10);
+  const rows = await query(
+    'tank_readings',
+    `date=gte.${startDate}&order=date.asc,time_str.asc&select=date,time_str,tank_no,volume&limit=10000`
+  );
+  if (!rows.length) return;
+
+  // Build per-timestamp series
+  const byTime = new Map(); // key = "YYYY-MM-DD HH:MM" → {ms, t1, t2}
+  for (const r of rows) {
+    const key = r.date + ' ' + (r.time_str || '').slice(0, 5);
+    if (!byTime.has(key)) byTime.set(key, { ms: null, t1: null, t2: null });
+    const entry = byTime.get(key);
+    const v = Number(r.volume) || 0;
+    if (v < 100) continue; // glitch filter (same rule as offload-calc)
+    if (r.tank_no === '1') entry.ms = v;
+    else if (r.tank_no === '2') entry.t1 = v;
+    else if (r.tank_no === '3') entry.t2 = v;
+  }
+  const sorted = [...byTime.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  // Trim to most recent N days from latest reading
+  const latest = sorted[sorted.length - 1][0];
+  const latestMs = new Date(latest.replace(' ', 'T') + ':00').getTime();
+  const cutoff = latestMs - tankChartDays * 86400000;
+  const trimmed = sorted.filter(([k]) => new Date(k.replace(' ', 'T') + ':00').getTime() >= cutoff);
+
+  const labels = trimmed.map(([k]) => {
+    const [d, t] = k.split(' ');
+    const dt = new Date(d + 'T' + t + ':00');
+    if (tankChartDays >= 7) return dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + ' ' + t;
+    if (tankChartDays >= 2) return dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + '\n' + t;
+    return t;
+  });
+  const msSeries = trimmed.map(([, v]) => v.ms);
+  const t1Series = trimmed.map(([, v]) => v.t1);
+  const t2Series = trimmed.map(([, v]) => v.t2);
+
+  document.getElementById('tankChartRange').textContent =
+    '— ' + fmtDate(trimmed[0][0].split(' ')[0]) + ' → ' + fmtDate(latest.split(' ')[0]);
+
+  if (tankChart) tankChart.destroy();
+  tankChart = new Chart(document.getElementById('tankChart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'MS (T1)',  data: msSeries, borderColor: '#f0b429', backgroundColor: '#f0b42922', borderWidth: 2, pointRadius: 0, tension: 0.25, spanGaps: true },
+        { label: 'HSD T1 (T2)', data: t1Series, borderColor: '#4ade80', backgroundColor: '#4ade8022', borderWidth: 2, pointRadius: 0, tension: 0.25, spanGaps: true },
+        { label: 'HSD T2 (T3)', data: t2Series, borderColor: '#22d3ee', backgroundColor: '#22d3ee22', borderWidth: 2, pointRadius: 0, tension: 0.25, spanGaps: true },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#6b7194', font: { size: 12, family: 'Inter' }, usePointStyle: true, pointStyle: 'rectRounded' } },
+        tooltip: {
+          callbacks: { label: ctx => ctx.dataset.label + ': ' + (ctx.parsed.y == null ? '—' : Math.round(ctx.parsed.y).toLocaleString('en-IN') + ' L') }
+        }
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: '#6b7194', font: { size: 9, family: 'Inter' },
+            maxRotation: 0, autoSkip: true,
+            maxTicksLimit: tankChartDays >= 7 ? 10 : (tankChartDays >= 2 ? 12 : 12)
+          },
+          grid: { color: '#1e2133' }
+        },
+        y: {
+          ticks: { color: '#6b7194', font: { family: 'Inter' }, callback: v => v.toLocaleString('en-IN') + 'L' },
+          grid: { color: '#1e2133' },
+          suggestedMin: 0
+        }
+      }
+    }
+  });
 }
 
 async function loadTanker() {
@@ -812,6 +919,7 @@ async function loadAll() {
     loadCashCredits(),
     loadFuelRate(),
     loadTanks(),
+    loadTankChart(),
     loadTanker(),
     loadSettlements(),
     loadNozzles(),
