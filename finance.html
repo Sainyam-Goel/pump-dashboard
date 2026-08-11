@@ -432,20 +432,30 @@ function render() {
 
 function agg(present) {
   const L = ledgerByDate();
-  let hsd = 0, ms = 0, other = 0, income = 0, exp = 0, credit = 0, pp = 0, hdfc = 0, bank = 0, picked = 0;
+  let hsd = 0, ms = 0, other = 0, ledgerInc = 0, exp = 0, credit = 0, pp = 0, hdfc = 0, bank = 0, picked = 0;
   let cogsTotal = 0, hsdL = 0, msL = 0;
   present.forEach(d => {
-    const r = L[d]; if (!r) return;
-    hsd += r.hsd_income || 0; ms += r.ms_income || 0; income += r.total_income || 0;
-    exp += r.total_expenses || 0; credit += r.total_credit || 0;
-    pp += r.phonepe || 0; hdfc += r.hdfc_card || 0; bank += r.bank_deposit || 0; picked += r.cash_picked || 0;
+    const r = L[d];
+    if (r) {
+      // CASH FLOW income = ledger total_income (what the manager's cash reconciles to)
+      ledgerInc += r.total_income || 0;
+      exp += r.total_expenses || 0; credit += r.total_credit || 0;
+      pp += r.phonepe || 0; hdfc += r.hdfc_card || 0; bank += r.bank_deposit || 0; picked += r.cash_picked || 0;
+    }
+    // P&L REVENUE from IRAS shift totals (machine-accurate, income = liters × retail).
+    // The OCR daily_ledger hsd_income/ms_income are unreliable (HSD/MS swapped or
+    // inflated on many days — verified Jul 2026: 30/30 days inconsistent with liters).
+    const st = shiftTotals.find(x => x.shift_date === d);
+    if (st && st.hsd_income != null) hsd += Number(st.hsd_income);
+    if (st && st.ms_income != null) ms += Number(st.ms_income);
     const cg = cogsForDay(d);
     if (cg) { cogsTotal += cg.total; hsdL += cg.hsd_l; msL += cg.ms_l; }
   });
-  other = income - hsd - ms;
+  other = Math.max(0, ledgerInc - hsd - ms); // residual (lube/credit payments)
   const opening = present.length ? (L[present[0]].yesterday_cash || 0) : 0;
   const closing = present.length ? (L[present[present.length-1]].total_cash || 0) : 0;
-  return { hsd, ms, other, income, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL };
+  const revenue = hsd + ms;
+  return { hsd, ms, other, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL };
 }
 
 function renderSummary(present) {
@@ -501,11 +511,11 @@ function renderCashFlow(present) {
     if (r.type === 'payment' || r.type === 'debit') udharRecv += Number(r.amount) || 0;
   });
   const el = document.getElementById('cfBody');
-  const expected = a.opening + a.income + udharRecv - a.pp - a.hdfc - a.bank - a.picked - a.credit - a.exp;
+  const expected = a.opening + a.ledgerInc + udharRecv - a.pp - a.hdfc - a.bank - a.picked - a.credit - a.exp;
   const diff = Math.round((expected - a.closing) * 100) / 100;
   let html = `
     <div class="ledger-row"><span class="label">Opening Cash</span><span class="amt">${fmtR(a.opening)}</span></div>
-    <div class="ledger-row"><span class="label">+ Income (sales &amp; other)</span><span class="amt text-green">+${fmtR(a.income)}</span></div>
+    <div class="ledger-row"><span class="label">+ Income (ledger)</span><span class="amt text-green">+${fmtR(a.ledgerInc)}</span></div>
     <div class="ledger-row"><span class="label">+ Udhar Received Back</span><span class="amt text-green">+${fmtR(udharRecv)}</span></div>
     <div class="ledger-row"><span class="label">&minus; PhonePe Settlement</span><span class="amt text-red">&minus;${fmtR(a.pp)}</span></div>
     <div class="ledger-row"><span class="label">&minus; HDFC / Card Settlement</span><span class="amt text-red">&minus;${fmtR(a.hdfc)}</span></div>
@@ -732,7 +742,7 @@ function exportPeriod(tag) {
       ['HSD Sales', a.hsd],
       ['MS Sales', a.ms],
       ['Other Income', a.other],
-      ['Total Income', a.income],
+      ['Total Income (IRAS revenue)', a.income],
       ['COGS', a.cogs],
       ['Gross Margin', gross],
       ['Total Expenses (Kharcha)', a.exp],
@@ -740,7 +750,7 @@ function exportPeriod(tag) {
       [''],
       ['CASH FLOW'],
       ['Opening Cash', a.opening],
-      ['+ Income', a.income],
+      ['+ Income (ledger)', a.ledgerInc],
       ['- PhonePe Settlement', a.pp],
       ['- HDFC / Card Settlement', a.hdfc],
       ['- Bank Deposit', a.bank],
@@ -748,7 +758,7 @@ function exportPeriod(tag) {
       ['- Credits Given (Udhar)', a.credit],
       ['- Expenses (Kharcha)', a.exp],
       ['Closing Cash', a.closing],
-      ['Recon Gap', Math.round((a.opening + a.income - a.pp - a.hdfc - a.bank - a.picked - a.credit - a.exp - a.closing) * 100) / 100],
+      ['Recon Gap', Math.round((a.opening + a.ledgerInc - a.pp - a.hdfc - a.bank - a.picked - a.credit - a.exp - a.closing) * 100) / 100],
     ]
   });
 
