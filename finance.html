@@ -255,6 +255,7 @@ let settlements = [];   // { date, source, amount, transactions }
 let ccTxns = [];        // { date, gross_amount, msf, net_payable, batch_no }
 let fuelRates = [];     // { date, petrol_rate, diesel_rate }
 let nozzleReceipts = []; // { date, nozzle_id, reading } — for monthly totalizer check
+let lubeSales = [];      // { date, product, quantity, amount } — real lube income (P&L)
 let padData = null;
 let chart = null;
 
@@ -336,7 +337,7 @@ async function rpc(name, body = {}) {
 
 async function loadAll() {
   try {
-    const [l, c, e, s, cc, fr, nr] = await Promise.all([
+    const [l, c, e, s, cc, fr, nr, lube] = await Promise.all([
       query('daily_ledger', 'order=date.asc&select=date,hsd_income,ms_income,total_income,yesterday_cash,total_cash,phonepe,hdfc_card,bank_deposit,cash_picked,total_credit,total_expenses'),
       query('credit_ledger', 'order=date.asc&select=date,party_name,type,amount'),
       query('expense_ledger', 'order=date.asc&select=date,category,amount'),
@@ -344,8 +345,9 @@ async function loadAll() {
       query('cc_transactions', 'order=date.asc&select=date,batch_no,transactions,gross_amount,msf,net_payable'),
       query('fuel_rates', 'order=date.asc&select=date,petrol_rate,diesel_rate'),
       query('nozzle_receipts', 'order=date.asc&select=date,nozzle_id,reading'),
+      query('lubricant_sales', 'order=date.asc&select=date,product,quantity,amount'),
     ]);
-    ledger = l; credits = c; expenses = e; settlements = s; ccTxns = cc; fuelRates = fr; nozzleReceipts = nr;
+    ledger = l; credits = c; expenses = e; settlements = s; ccTxns = cc; fuelRates = fr; nozzleReceipts = nr; lubeSales = lube;
     // Calendar-day liters from the daily_sales_liters RPC (server-side aggregation,
     // matches the daily_ledger income frame). NOTE: the 9AM→9AM shift RPC
     // (iss_shift_totals) bleeds into adjacent days and is NOT used for COGS.
@@ -488,13 +490,16 @@ function agg(present) {
     if (c.date < start || c.date > end) return;
     if (c.type === 'payment' || c.type === 'debit') creditRepaid += Number(c.amount) || 0;
   });
-  // OTHER INCOME = what the ledger counted beyond fuel revenue, MINUS credit repayments.
-  // (Repayments are cash-flow only; remaining residual ≈ lube sales + rounding.)
-  other = Math.max(0, ledgerInc - hsd - ms - creditRepaid);
+  // OTHER INCOME = REAL lube sales only (lubricant_sales table). The OCR ledger's
+  // residual over IRAS revenue is NOT income — it's an OCR accounting gap
+  // (verified: Jul 2026 residual ₹3.9L with ₹0 real lube, ₹0 repayments).
+  lubeSales.forEach(x => { if (x.date >= start && x.date <= end) other += Number(x.amount) || 0; });
+  // Unreconciled OCR-vs-IRAS income gap (informational — flagged, not revenue)
+  const ocrGap = Math.max(0, ledgerInc - hsd - ms - creditRepaid - other);
   const opening = present.length ? (L[present[0]].yesterday_cash || 0) : 0;
   const closing = present.length ? (L[present[present.length-1]].total_cash || 0) : 0;
-  const revenue = hsd + ms;
-  return { hsd, ms, other, creditRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL };
+  const revenue = hsd + ms + other;
+  return { hsd, ms, other, ocrGap, creditRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL };
 }
 
 function renderSummary(present) {
@@ -530,13 +535,16 @@ function renderPnl(present) {
   let html = `
     <div class="ledger-row"><span class="label">HSD Sales</span><span class="amt text-green">${fmtR(a.hsd)}</span></div>
     <div class="ledger-row"><span class="label">MS Sales</span><span class="amt text-green">${fmtR(a.ms)}</span></div>`;
-  if (a.other !== 0) html += `<div class="ledger-row"><span class="label">Other Income (lube etc.)</span><span class="amt text-green">${fmtR(a.other)}</span></div>`;
+  if (a.other !== 0) html += `<div class="ledger-row"><span class="label">Other Income (lube sales)</span><span class="amt text-green">${fmtR(a.other)}</span></div>`;
   html += `
     <div class="ledger-row total"><span class="label">Total Income</span><span class="amt text-green">${fmtR(a.income)}</span></div>
     <div class="ledger-row"><span class="label">COGS (${fmtL(a.hsdL)} HSD + ${fmtL(a.msL)} MS @ rate &minus; margin)</span><span class="amt text-orange">&minus;${fmtR(a.cogs)}</span></div>
     <div class="ledger-row total"><span class="label">Gross Margin</span><span class="amt ${gross >= 0 ? 'text-green' : 'text-red'}">${fmtR(gross)}</span></div>
     <div class="ledger-row"><span class="label">Total Expenses (Kharcha)</span><span class="amt text-red">&minus;${fmtR(a.exp)}</span></div>
     <div class="ledger-row total pnl-net ${net >= 0 ? 'positive' : 'negative'}"><span class="label">Net Profit (P&amp;L)</span><span class="amt">${fmtR(net)}</span></div>`;
+  if (a.ocrGap > 500) {
+    html += `<div class="warn">\u26A0\uFE0F Ledger reports ${fmtR(a.ocrGap)} more income than IRAS fuel sales + lube + repayments — likely OCR accounting errors in this period.</div>`;
+  }
   el.innerHTML = html;
 }
 
@@ -867,7 +875,8 @@ function exportPeriod(tag) {
       ['PROFIT & LOSS'],
       ['HSD Sales', a.hsd],
       ['MS Sales', a.ms],
-      ['Other Income (lube, excl. credit repayments)', a.other],
+      ['Other Income (lube sales)', a.other],
+      ['OCR Recon Gap (not income)', a.ocrGap],
       ['Total Income (IRAS revenue)', a.income],
       ['COGS', a.cogs],
       ['Gross Margin', gross],
