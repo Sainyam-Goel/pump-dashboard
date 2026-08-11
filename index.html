@@ -202,29 +202,6 @@ if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginO
   </div>
 </div>
 
-<!-- Tank Levels -->
-<div class="section-title">Tank Levels <span id="tankDate" class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0"></span></div>
-<div class="grid grid-3" id="tankCards">
-  <div class="card">
-    <div class="card-title">Tank 1 &mdash; MS (Petrol) <span class="badge badge-golden">20KL</span></div>
-    <div class="card-value" style="color:var(--petrol)" id="msVol">--</div>
-    <div class="tank-bar"><div class="tank-fill ms" id="msBar" style="width:0%"><span class="tank-label" id="msPct"></span></div></div>
-    <div class="card-sub" id="msWater"></div>
-  </div>
-  <div class="card">
-    <div class="card-title">Tank 2 &mdash; HSD T1 <span class="badge badge-diesel">20KL</span></div>
-    <div class="card-value" style="color:var(--diesel)" id="hsdT1Vol">--</div>
-    <div class="tank-bar"><div class="tank-fill hsd" id="hsdT1Bar" style="width:0%"><span class="tank-label" id="hsdT1Pct"></span></div></div>
-    <div class="card-sub" id="hsdT1Water"></div>
-  </div>
-  <div class="card">
-    <div class="card-title">Tank 3 &mdash; HSD T2 <span class="badge badge-diesel">20KL</span></div>
-    <div class="card-value" style="color:var(--diesel)" id="hsdT2Vol">--</div>
-    <div class="tank-bar"><div class="tank-fill hsd" id="hsdT2Bar" style="width:0%"><span class="tank-label" id="hsdT2Pct"></span></div></div>
-    <div class="card-sub" id="hsdT2Water"></div>
-  </div>
-</div>
-
 <!-- Sales Activity (from IRAS transactions) -->
 <div class="section-title">Sales Activity <span id="issDate" class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0"></span></div>
 <div class="summary-row">
@@ -245,6 +222,29 @@ if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginO
     <div class="card-title">Avg Ticket (MS)</div>
     <div class="card-value" style="color:var(--petrol)" id="issAvgMs">--</div>
     <div class="card-sub text-muted" id="issAvgMsL"></div>
+  </div>
+</div>
+
+<!-- Tank Levels -->
+<div class="section-title">Tank Levels <span id="tankDate" class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0"></span></div>
+<div class="grid grid-3" id="tankCards">
+  <div class="card">
+    <div class="card-title">Tank 1 &mdash; MS (Petrol) <span class="badge badge-golden">20KL</span></div>
+    <div class="card-value" style="color:var(--petrol)" id="msVol">--</div>
+    <div class="tank-bar"><div class="tank-fill ms" id="msBar" style="width:0%"><span class="tank-label" id="msPct"></span></div></div>
+    <div class="card-sub" id="msWater"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Tank 2 &mdash; HSD T1 <span class="badge badge-diesel">20KL</span></div>
+    <div class="card-value" style="color:var(--diesel)" id="hsdT1Vol">--</div>
+    <div class="tank-bar"><div class="tank-fill hsd" id="hsdT1Bar" style="width:0%"><span class="tank-label" id="hsdT1Pct"></span></div></div>
+    <div class="card-sub" id="hsdT1Water"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Tank 3 &mdash; HSD T2 <span class="badge badge-diesel">20KL</span></div>
+    <div class="card-value" style="color:var(--diesel)" id="hsdT2Vol">--</div>
+    <div class="tank-bar"><div class="tank-fill hsd" id="hsdT2Bar" style="width:0%"><span class="tank-label" id="hsdT2Pct"></span></div></div>
+    <div class="card-sub" id="hsdT2Water"></div>
   </div>
 </div>
 
