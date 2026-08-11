@@ -49,13 +49,13 @@ tr:hover td { background: #181b2844; }
 .text-blue { color: var(--petrol); }
 .text-purple { color: #a78bfa; }
 .text-muted { color: var(--muted); }
-.tab-row { display: flex; gap: 6px; margin-bottom: 14px; }
+.tab-row { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
 .tab { padding: 7px 18px; border-radius: 10px; border: 1px solid var(--card-border); background: transparent; color: var(--muted); cursor: pointer; font-size: 0.78rem; font-weight: 600; transition: all 0.2s; font-family: inherit; }
 .tab:hover { border-color: var(--accent); color: var(--text); }
 .tab.active { background: var(--accent); color: white; border-color: var(--accent); box-shadow: 0 0 20px rgba(99,102,241,0.3); }
 .loading { color: var(--muted); font-size: 0.82rem; padding: 20px; text-align: center; }
 .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
-.nav-row { display: flex; align-items: center; gap: 8px; }
+.nav-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .nav-btn { background: var(--card); border: 1px solid var(--card-border); color: var(--muted); padding: 8px 16px; border-radius: 10px; cursor: pointer; font-size: 0.78rem; font-weight: 600; transition: all 0.2s; font-family: inherit; }
 .nav-btn:hover { border-color: var(--accent); color: var(--text); }
 .nav-btn.primary { background: var(--accent); color: white; border-color: var(--accent); }
@@ -78,6 +78,11 @@ tr:hover td { background: #181b2844; }
 .pnl-net.positive { color: var(--green); }
 .pnl-net.negative { color: var(--red); }
 .cashflow-closing { border-top: 2px solid var(--accent); padding-top: 10px; }
+.bin-header { font-size: 0.75rem; font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 12px; padding-bottom: 4px; border-bottom: 1px solid #2a2e4a; }
+.bin-header:first-child { margin-top: 0; }
+.recon-ok { color: var(--green); font-size: 0.78rem; }
+.recon-bad { color: var(--red); font-size: 0.78rem; }
+.pad-balance { font-size: 1.9rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 @media (max-width: 600px) {
   body { padding: 12px; }
   .grid-2 { grid-template-columns: 1fr; }
@@ -93,10 +98,10 @@ tr:hover td { background: #181b2844; }
 <div class="header">
   <div>
     <h1>Finance &mdash; Bansiwala Filling Station</h1>
-    <div class="subtitle">Pump Ledger Analysis &bull; Powered by daily_ledger + credit_ledger + expense_ledger</div>
+    <div class="subtitle">Pump Ledger Analysis &bull; COGS &bull; Settlements &bull; Udhar &bull; PAD &bull; Expense Bins</div>
   </div>
   <div style="text-align:right">
-    <button class="nav-btn" onclick="location.href='dashboard.html'" style="margin-left:6px">&larr; Dashboard</button>
+    <button class="nav-btn" onclick="location.href='dashboard.html'">&larr; Dashboard</button>
   </div>
 </div>
 
@@ -146,6 +151,20 @@ tr:hover td { background: #181b2844; }
   </div>
 </div>
 
+<!-- Settlement verification + PAD -->
+<div class="grid grid-2">
+  <div class="card">
+    <div class="card-icon">&#x1F4B3;</div>
+    <div class="card-title">Settlement Verification <span class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0">ledger vs bank data</span></div>
+    <div id="settlementBody" class="loading">Loading...</div>
+  </div>
+  <div class="card">
+    <div class="card-icon">&#x1F4B1;</div>
+    <div class="card-title">PAD Balance (SDMS / IOCL)</div>
+    <div id="padBody" class="loading">Loading...</div>
+  </div>
+</div>
+
 <!-- Line items -->
 <div class="section-title">Line Items</div>
 <div class="grid grid-2">
@@ -154,7 +173,7 @@ tr:hover td { background: #181b2844; }
     <div id="creditBody" class="loading">Loading...</div>
   </div>
   <div class="card">
-    <div class="card-title">Expenses (Kharcha) <span id="expenseSub" class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0"></span></div>
+    <div class="card-title">Expenses (Kharcha) by Bin <span id="expenseSub" class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0"></span></div>
     <div id="expenseBody" class="loading">Loading...</div>
   </div>
 </div>
@@ -176,16 +195,81 @@ const SUPABASE_URL = 'https://zkomggcvakdocbgrglkn.supabase.co/rest/v1';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inprb21nZ2N2YWtkb2NiZ3JnbGtuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4NjI5MjIsImV4cCI6MjA5MDQzODkyMn0.Ma3NTFbjiLk4iFN7jgA3jXWT7m3di6gayD3svsnwQpc';
 const HEADERS = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` };
 
+// Dealer margins (from Apr 2026 IOCL invoices, same as iras-analytics money())
+const MS_MARGIN = 3.94;
+const HSD_MARGIN = 2.56;
+
 let period = 'day';
-let anchor = null;         // Date object for the current period start
+let anchor = null;
 let latestDate = null;
-let ledger = [];           // daily_ledger rows (asc)
-let credits = [];          // credit_ledger rows
-let expenses = [];         // expense_ledger rows
+let ledger = [];
+let credits = [];
+let expenses = [];
+let shiftTotals = [];   // { shift_date, hsd_liters, ms_liters, ... } for COGS
+let settlements = [];   // { date, source, amount, transactions }
+let ccTxns = [];        // { date, gross_amount, msf, net_payable, batch_no }
+let fuelRates = [];     // { date, petrol_rate, diesel_rate }
+let padData = null;
 let chart = null;
+
+// Expense bin classification (client-side; categories written in the ledger)
+// Handles English + Hindi (transliterated) category names from the OCR.
+const BIN_RULES = [
+  {
+    bin: 'Salary & Wages',
+    re: /SALARY|SALESMAN|JAMADAR|CHOWKIDAR|CHAUKIDAR|STAFF|LABOR|LABOUR|MAJDOOR|DIHADI|SWEEPER|KAIPUR|SECURITY|GUARD|SURAKSHA|MUKESH.*SALESMAN|SURESH|SANDEEP|SUNIL.*SALARY|HARDAYAL|HARDHYAN|ANGREJ|AJAY.*SALARY|ROSHAN|MANAGER|SELSMAN|ADVANCE.*(SALARY|SALESMAN|JAMADAR|SWEEPER|STAFF)|मुनीम|सैलरी|सलरी|सेल्समैन|सेलजमैन|सैलजमैन|सैल्समैन|मैलजमैन|मैलमैन|मैलजमैने|स्वीपर|जमादार|चौकीदार|गार्ड|मजदूर|मजूरी|सिक्योरिटी|रोशन|हरदयाल|हरध्यान|अंग्रेज|सुनील|सुरेश|संदीप|सन्नी|मैनेजर|मैलजमेन|चक सेलमेन/i
+  },
+  {
+    bin: 'Food & Tea (Staff)',
+    re: /TEA|CHAI|FOOD|KHANA|KHAN|चाय|खाना|दूध|पानी|बर्फ|स्नैक्स|नाश्ता|SNACK|AALU|आलू/i
+  },
+  {
+    bin: 'Maintenance & Repairs',
+    re: /MISTRI|PLUMBER|MAINTENANCE|MAINTAIN|REPAIR|MACHINE|मशीन|MOTOR|THERMOSTAT|AUTOMATION|BULB|LED|BATTERY|DENSITY|PHOTOSTAT|CALCULATOR|कॉपी|कापी|COPY|COMPUTER|METER|ELECTRICITY|BIJLI|बिजली|BILL BIJLI|HITECH|DRAWING|SITE|THERMOMETER|थर्मामीटर|पंचर|प्लास|LOCK|टेप|STAMPING|STAMP|चार्जर|केबल|HISAB|हिसाब|KHATA|खाता|REGISTER|सिलाई|CURTAIN|पर्दा|FAN|पंखा|SWITCH|WHITE CEMENT|सीमेंट|PAINT|पेंट|GITTI|गिट्टी|FILTER|मरम्मत|ठीक|पेचकस|पेंच/i
+  },
+  {
+    bin: 'Fuel & Vehicle (Home/Shop)',
+    re: /GENERATOR|जनरेटर|जरनेटर|SCOOTY|स्कूटी|सुकती|सुकरी|MOTORCYCLE|CYCLE|VEHICLE|गाडी|गाड़ी|TROOP|UPPP|INOVA|INNOVA|DIESEL.*LTR|FUEL|पेट्रोल|PETROL|GADI|TAXI|टैक्सी|TEMPO|टेम्पू|टेम्पो|TRUCK|HITECH.*VEHICLE|HSD.*VEHICLE|MS.*VEHICLE|HARDAYAL.*VEHICLE|SATSANG|सतसंग|SCOOTY.*(PUMP|PETROL|PUNCH)|SATYAM|SANYAM/i
+  },
+  {
+    bin: 'Donations & Religious',
+    re: /DONATION|DAAN|दान|PUJA|पूजा|TEMPLE|MANDIR|मंदिर|DHOOP|धुप|धूप|PRASAD|प्रसाद|BABA JI|बाबा|MANDIR|जय मंदिर|JAY MANDIR|INCENSE|पूजन/i
+  },
+  {
+    bin: 'Cleaning & Supplies',
+    re: /SAFAI|सफाई|SOAP|SABUN|साबुन|SURF|PHENYL|BROOM|JHAADU|झाड़ू|HARPIC|TEZAAB|SAMAN|सामान|SUPPLY|DETERGENT|HANDWASH|WIPES|POWDER|Phenyl|SWEEPING|DHULAI|धुलाई|पोंछा|Jhadu/i
+  },
+  {
+    bin: 'Medicine & Cow Care',
+    re: /MEDICINE|DAWAI|दवाई|दवा|MEDS|COW|CALF|गाय|बछड़ा|PASHU|पशु|VET/i
+  },
+  {
+    bin: 'Electricity & Utilities',
+    re: /ELECTRICITY|BIJLI|बिजली|BILL BIJLI|METER.*ELECTRIC|POWER|CURRENT|बिल|BILL|WATER|पानी|MOTOR.*WATER|TUBE WELL|ट्यूबवेल|TANK CHECK|PHONE|MOBILE|RECHARGE|रिचार्ज|INTERNET|SIM|TELECOM/i
+  },
+  {
+    bin: 'Bank & Cash Charges',
+    re: /BANK|JAMA|जमा|CASH.*(BANK|DEPOSIT)|BANK.*(DEPOSIT|JAMA)|MS.*BANK|COOP|MSF|CASH OUT|Torn Note|टूटा|DISC|छूट|पेनाल्टी|PENALTY|INTEREST|ब्याज/i
+  },
+  {
+    bin: 'Office & Stationery',
+    re: /PHOTOSTAT|फोटो|OFFICE|दफ्तर|PEN|पेन|PENCIL|DUSTER|बोर्ड|REGISTER|KHATA|खाता|COPY|कॉपी|HISAB|हिसाब|PAD|CALCULATOR|गणक|PRINTER|SAMPLE|नमूना|POLICY/i
+  },
+  { bin: 'Miscellaneous', re: /.*/i },
+];
+const FALLBACK_BIN = 'Miscellaneous';
+
+function categorize(cat) {
+  const c = String(cat || '');
+  for (const rule of BIN_RULES) {
+    if (rule.re.test(c)) return rule.bin;
+  }
+  return FALLBACK_BIN;
+}
 
 function fmt(n) { return n == null ? '--' : Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 }); }
 function fmtR(n) { return n == null ? '--' : '\u20B9' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 }); }
+function fmtL(n) { return n == null ? '--' : Number(n).toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' L'; }
 function fmtDate(d) { if (!d) return '--'; const dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }); }
 function iso(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
 function parseISO(s) { return new Date(s + 'T00:00:00'); }
@@ -196,14 +280,27 @@ async function query(table, params = '') {
   return res.json();
 }
 
+async function rpc(name, body = {}) {
+  const res = await fetch(`${SUPABASE_URL}/rpc/${name}`, {
+    method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
+  return res.json();
+}
+
 async function loadAll() {
   try {
-    const [l, c, e] = await Promise.all([
+    const [l, c, e, s, cc, fr] = await Promise.all([
       query('daily_ledger', 'order=date.asc&select=date,hsd_income,ms_income,total_income,yesterday_cash,total_cash,phonepe,hdfc_card,bank_deposit,cash_picked,total_credit,total_expenses'),
       query('credit_ledger', 'order=date.asc&select=date,party_name,type,amount'),
       query('expense_ledger', 'order=date.asc&select=date,category,amount'),
+      query('settlements', 'order=date.asc&select=date,source,amount,transactions'),
+      query('cc_transactions', 'order=date.asc&select=date,batch_no,transactions,gross_amount,msf,net_payable'),
+      query('fuel_rates', 'order=date.asc&select=date,petrol_rate,diesel_rate'),
     ]);
-    ledger = l; credits = c; expenses = e;
+    ledger = l; credits = c; expenses = e; settlements = s; ccTxns = cc; fuelRates = fr;
+    try { shiftTotals = await rpc('iss_shift_totals', {}); } catch (err) { console.warn('iss_shift_totals:', err); shiftTotals = []; }
+    try { padData = await query('pad_balance', 'order=date.desc&limit=200'); } catch (err) { padData = null; console.warn('pad_balance table not available:', err); }
     latestDate = ledger.length ? ledger[ledger.length - 1].date : null;
     anchor = parseISO(latestDate);
     document.getElementById('errorBar').style.display = 'none';
@@ -237,10 +334,31 @@ function goLatest() { anchor = parseISO(latestDate); render(); }
 // ---------- helpers ----------
 const ledgerByDate = () => { const m = {}; ledger.forEach(r => m[r.date] = r); return m; };
 
+// Latest fuel rate on or before a date
+function rateOn(date) {
+  let ms = null, hsd = null;
+  for (const r of fuelRates) {
+    if (r.date <= date && r.petrol_rate != null) { ms = r.petrol_rate; hsd = r.diesel_rate; }
+  }
+  return { ms, hsd };
+}
+
+// COGS for a day: liters (shift) × (retail rate − dealer margin)
+function cogsForDay(date) {
+  const r = rateOn(date);
+  if (!r.ms && !r.hsd) return null;
+  const t = shiftTotals.find(x => x.shift_date === date);
+  const hsdL = Number(t && t.hsd_liters) || 0;
+  const msL = Number(t && t.ms_liters) || 0;
+  const msCogs = r.ms ? msL * (r.ms - MS_MARGIN) : 0;
+  const hsdCogs = r.hsd ? hsdL * (r.hsd - HSD_MARGIN) : 0;
+  return { hsd_l: hsdL, ms_l: msL, hsd: hsdCogs, ms: msCogs, total: msCogs + hsdCogs, rate_ms: r.ms, rate_hsd: r.hsd };
+}
+
 function periodRange() {
   if (period === 'day') return { start: iso(anchor), end: iso(anchor) };
   if (period === 'week') {
-    const d = new Date(anchor); const dow = (d.getDay() + 6) % 7; // Monday start
+    const d = new Date(anchor); const dow = (d.getDay() + 6) % 7;
     d.setDate(d.getDate() - dow);
     const end = new Date(d); end.setDate(end.getDate() + 6);
     return { start: iso(d), end: iso(end) };
@@ -276,6 +394,8 @@ function render() {
   renderSummary(present);
   renderPnl(present);
   renderCashFlow(present);
+  renderSettlements(start, end);
+  renderPad();
   renderLineItems(present, start, end);
   renderTrend(present, start, end);
 }
@@ -283,11 +403,19 @@ function render() {
 function agg(present) {
   const L = ledgerByDate();
   let hsd = 0, ms = 0, other = 0, income = 0, exp = 0, credit = 0, pp = 0, hdfc = 0, bank = 0, picked = 0;
-  present.forEach(d => { const r = L[d]; if (!r) return; hsd += r.hsd_income || 0; ms += r.ms_income || 0; income += r.total_income || 0; exp += r.total_expenses || 0; credit += r.total_credit || 0; pp += r.phonepe || 0; hdfc += r.hdfc_card || 0; bank += r.bank_deposit || 0; picked += r.cash_picked || 0; });
+  let cogsTotal = 0, hsdL = 0, msL = 0;
+  present.forEach(d => {
+    const r = L[d]; if (!r) return;
+    hsd += r.hsd_income || 0; ms += r.ms_income || 0; income += r.total_income || 0;
+    exp += r.total_expenses || 0; credit += r.total_credit || 0;
+    pp += r.phonepe || 0; hdfc += r.hdfc_card || 0; bank += r.bank_deposit || 0; picked += r.cash_picked || 0;
+    const cg = cogsForDay(d);
+    if (cg) { cogsTotal += cg.total; hsdL += cg.hsd_l; msL += cg.ms_l; }
+  });
   other = income - hsd - ms;
   const opening = present.length ? (L[present[0]].yesterday_cash || 0) : 0;
   const closing = present.length ? (L[present[present.length-1]].total_cash || 0) : 0;
-  return { hsd, ms, other, income, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length };
+  return { hsd, ms, other, income, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL };
 }
 
 function renderSummary(present) {
@@ -303,9 +431,9 @@ function renderSummary(present) {
     </div>
     <div class="card glow-card" style="--glow-color: var(--glow-petrol)">
       <div class="card-icon">&#x1F4C9;</div>
-      <div class="card-title">Expenses</div>
-      <div class="stat-pair"><div class="card-value text-red">${fmtR(a.exp)}</div></div>
-      <div class="card-sub">${a.days} day(s) in period</div>
+      <div class="card-title">COGS (Fuel Cost)</div>
+      <div class="stat-pair"><div class="card-value text-orange">${fmtR(a.cogs)}</div></div>
+      <div class="card-sub">${fmtL(a.hsdL)} HSD + ${fmtL(a.msL)} MS (incl. margin)</div>
     </div>
     <div class="card glow-card" style="--glow-color: var(--glow-green)">
       <div class="card-icon">&#x1F4C8;</div>
@@ -317,7 +445,8 @@ function renderSummary(present) {
 
 function renderPnl(present) {
   const a = agg(present);
-  const net = a.income - a.exp;
+  const gross = a.income - a.cogs;
+  const net = gross - a.exp;
   const el = document.getElementById('pnlBody');
   let html = `
     <div class="ledger-row"><span class="label">HSD Sales</span><span class="amt text-green">${fmtR(a.hsd)}</span></div>
@@ -325,6 +454,8 @@ function renderPnl(present) {
   if (a.other !== 0) html += `<div class="ledger-row"><span class="label">Other Income (lube/credit payments)</span><span class="amt text-green">${fmtR(a.other)}</span></div>`;
   html += `
     <div class="ledger-row total"><span class="label">Total Income</span><span class="amt text-green">${fmtR(a.income)}</span></div>
+    <div class="ledger-row"><span class="label">COGS (${fmtL(a.hsdL)} HSD + ${fmtL(a.msL)} MS @ rate &minus; margin)</span><span class="amt text-orange">&minus;${fmtR(a.cogs)}</span></div>
+    <div class="ledger-row total"><span class="label">Gross Margin</span><span class="amt ${gross >= 0 ? 'text-green' : 'text-red'}">${fmtR(gross)}</span></div>
     <div class="ledger-row"><span class="label">Total Expenses (Kharcha)</span><span class="amt text-red">&minus;${fmtR(a.exp)}</span></div>
     <div class="ledger-row total pnl-net ${net >= 0 ? 'positive' : 'negative'}"><span class="label">Net Profit (P&amp;L)</span><span class="amt">${fmtR(net)}</span></div>`;
   el.innerHTML = html;
@@ -332,12 +463,20 @@ function renderPnl(present) {
 
 function renderCashFlow(present) {
   const a = agg(present);
+  // Udhar received back during the period (payments/debits)
+  const { start, end } = periodRange();
+  let udharRecv = 0;
+  credits.forEach(r => {
+    if (r.date < start || r.date > end) return;
+    if (r.type === 'payment' || r.type === 'debit') udharRecv += Number(r.amount) || 0;
+  });
   const el = document.getElementById('cfBody');
-  const expected = a.opening + a.income - a.pp - a.hdfc - a.bank - a.picked - a.credit - a.exp;
+  const expected = a.opening + a.income + udharRecv - a.pp - a.hdfc - a.bank - a.picked - a.credit - a.exp;
   const diff = Math.round((expected - a.closing) * 100) / 100;
   let html = `
     <div class="ledger-row"><span class="label">Opening Cash</span><span class="amt">${fmtR(a.opening)}</span></div>
     <div class="ledger-row"><span class="label">+ Income (sales &amp; other)</span><span class="amt text-green">+${fmtR(a.income)}</span></div>
+    <div class="ledger-row"><span class="label">+ Udhar Received Back</span><span class="amt text-green">+${fmtR(udharRecv)}</span></div>
     <div class="ledger-row"><span class="label">&minus; PhonePe Settlement</span><span class="amt text-red">&minus;${fmtR(a.pp)}</span></div>
     <div class="ledger-row"><span class="label">&minus; HDFC / Card Settlement</span><span class="amt text-red">&minus;${fmtR(a.hdfc)}</span></div>
     <div class="ledger-row"><span class="label">&minus; Bank Deposit</span><span class="amt text-red">&minus;${fmtR(a.bank)}</span></div>
@@ -351,70 +490,122 @@ function renderCashFlow(present) {
   el.innerHTML = html;
 }
 
-function renderLineItems(present, start, end) {
-  // Credits for the period
+function renderSettlements(start, end) {
   const L = ledgerByDate();
+  // Aggregate ledger claims vs settlement records per source for the period
+  const ppLedger = {}, hdfcLedger = {};
+  daysInRange(start, end).forEach(d => {
+    const r = L[d]; if (!r) return;
+    ppLedger[d] = r.phonepe || 0;
+    hdfcLedger[d] = r.hdfc_card || 0;
+  });
+  // Settlement records by source (phonepe / cc)
+  const ppRec = {}, ccRec = {};
+  settlements.forEach(s => {
+    if (s.date < start || s.date > end) return;
+    const key = s.source && s.source.toLowerCase().includes('cc') ? 'cc' : (s.source && s.source.toLowerCase().includes('phone') ? 'phonepe' : 'other');
+    if (key === 'phonepe') ppRec[s.date] = (ppRec[s.date] || 0) + Number(s.amount || 0);
+    else if (key === 'cc') ccRec[s.date] = (ccRec[s.date] || 0) + Number(s.amount || 0);
+  });
+  // cc_transactions net per date
+  const ccNet = {};
+  ccTxns.forEach(t => { if (t.date >= start && t.date <= end) ccNet[t.date] = (ccNet[t.date] || 0) + Number(t.net_payable || 0); });
+
+  const dates = daysInRange(start, end).filter(d => L[d]);
+  const sum = o => Object.values(o).reduce((a, b) => a + b, 0);
+  const ppL = sum(ppLedger), ppS = sum(ppRec);
+  const hdL = sum(hdfcLedger), ccS = sum(ccRec), ccN = sum(ccNet);
+
+  const el = document.getElementById('settlementBody');
+  const row = (label, ledgerAmt, actualAmt, note) => {
+    const diff = ledgerAmt - actualAmt;
+    const cls = Math.abs(diff) <= 500 ? 'recon-ok' : 'recon-bad';
+    return `<div class="line-item"><span class="desc">${label}</span><span class="amt">${fmtR(ledgerAmt)} <span class="text-muted">vs</span> ${fmtR(actualAmt)} <span class="${cls}">(${diff >= 0 ? '+' : ''}${fmtR(diff)})</span></span></div>`;
+  };
+
+  let html = '';
+  html += row('PhonePe &mdash; ledger vs settlements', ppL, ppS, '');
+  html += row('HDFC/Card &mdash; ledger vs cc_transactions', hdL, ccN, '');
+  html += row('HDFC/Card &mdash; ledger vs settlements(src=cc)', hdL, ccS, '');
+  html += `<div class="card-sub text-muted" style="margin-top:8px">Ledger ${fmtDate(start)} &rarr; ${fmtDate(end)}. Settlement records ${dates.length} days checked.</div>`;
+  el.innerHTML = html;
+}
+
+function renderPad() {
+  const el = document.getElementById('padBody');
+  if (!padData || !padData.length) {
+    el.innerHTML = `<div class="text-muted" style="font-size:0.82rem">No PAD balance data. <br>Set up the <code>pad_balance</code> table and sync via the SDMS bookmarklet (see repo).</div>`;
+    return;
+  }
+  const last = padData[0];
+  const bal = Number(last.balance != null ? last.balance : (last.closing_balance != null ? last.closing_balance : 0));
+  const cls = bal >= 0 ? 'text-green' : 'text-red';
+  let html = `<div class="pad-balance ${cls}">${fmtR(bal)}</div>`;
+  html += `<div class="card-sub">As of ${fmtDate(last.date)} &bull; PAD (Payment Against Delivery) &mdash; IOCL account</div>`;
+  // Last few transactions
+  if (padData.length > 1) {
+    html += '<div style="margin-top:10px"><div class="card-sub" style="margin-bottom:4px">Recent activity:</div>';
+    padData.slice(1, 6).forEach(t => {
+      const amt = Number(t.amount || 0);
+      const isCredit = String(t.type || '').toUpperCase() === 'CREDIT' || (t.description || '').toUpperCase().includes('CREDIT');
+      html += `<div class="line-item"><span class="desc">${fmtDate(t.date)} ${t.description || ''}</span><span class="amt ${isCredit ? 'text-green' : 'text-red'}">${isCredit ? '+' : '-'}${fmtR(amt)}</span></div>`;
+    });
+    html += '</div>';
+  }
+  el.innerHTML = html;
+}
+
+function renderLineItems(present, start, end) {
+  // Credits for the period — given (udhar) vs received back
   const cIn = {}, cOut = {};
   credits.forEach(r => {
     if (r.date < start || r.date > end) return;
     const amt = Number(r.amount) || 0;
     const key = r.party_name || '?';
-    if (r.type === 'credit') { cIn[key] = (cIn[key] || 0) + amt; }
-    else { cOut[key] = (cOut[key] || 0) + amt; } // payment / debit = money received
+    if (r.type === 'credit') cIn[key] = (cIn[key] || 0) + amt;
+    else cOut[key] = (cOut[key] || 0) + amt;
   });
   const cKeys = Object.keys(cIn).concat(Object.keys(cOut)).filter((v, i, arr) => arr.indexOf(v) === i);
-  let cTotal = 0;
+  let cTotal = 0, cRecv = 0;
   let chtml = cKeys.length ? '' : '<div class="text-muted" style="font-size:0.82rem;padding:8px 2px">No credit entries in this period</div>';
   cKeys.sort((a, b) => ((cIn[b] || 0) - (cOut[b] || 0)) - ((cIn[a] || 0) - (cOut[a] || 0)));
   cKeys.forEach(k => {
     const given = cIn[k] || 0, recv = cOut[k] || 0;
-    cTotal += given;
+    cTotal += given; cRecv += recv;
     chtml += `<div class="line-item"><span class="desc">${k}</span><span class="amt">${recv ? '<span class="text-green">+'+fmtR(recv)+'</span> ' : ''}${given ? '<span class="text-red">'+fmtR(given)+'</span>' : ''}</span></div>`;
   });
+  if (cKeys.length) chtml += `<div class="ledger-row total"><span class="label">Net Udhar (given &minus; received)</span><span class="amt ${cTotal - cRecv > 0 ? 'text-red' : 'text-green'}">${fmtR(cTotal - cRecv)}</span></div>`;
   document.getElementById('creditSub').textContent = present.length ? (period === 'day' ? fmtDate(start) : fmtDate(start) + ' \u2013 ' + fmtDate(end)) : '';
   document.getElementById('creditBody').innerHTML = chtml;
 
-  // Expenses grouped by category for the period
-  const eAgg = {};
+  // Expenses grouped by BIN (with per-category detail)
+  const eAgg = {};        // bin → { total, items: {category: amt} }
   expenses.forEach(r => {
     if (r.date < start || r.date > end) return;
-    const key = r.category || '?';
-    eAgg[key] = (eAgg[key] || 0) + (Number(r.amount) || 0);
+    const bin = categorize(r.category);
+    const cat = r.category || '?';
+    if (!eAgg[bin]) eAgg[bin] = { total: 0, items: {} };
+    eAgg[bin].total += Number(r.amount) || 0;
+    eAgg[bin].items[cat] = (eAgg[bin].items[cat] || 0) + (Number(r.amount) || 0);
   });
-  const eKeys = Object.keys(eAgg).sort((a, b) => eAgg[b] - eAgg[a]);
+  const bins = Object.keys(eAgg).sort((a, b) => eAgg[b].total - eAgg[a].total);
   let etotal = 0;
-  let ehtml = eKeys.length ? '' : '<div class="text-muted" style="font-size:0.82rem;padding:8px 2px">No expenses in this period</div>';
-  eKeys.forEach(k => { etotal += eAgg[k]; ehtml += `<div class="line-item"><span class="desc">${k}</span><span class="amt">${fmtR(eAgg[k])}</span></div>`; });
+  let ehtml = bins.length ? '' : '<div class="text-muted" style="font-size:0.82rem;padding:8px 2px">No expenses in this period</div>';
+  bins.forEach(bin => {
+    const b = eAgg[bin];
+    etotal += b.total;
+    ehtml += `<div class="bin-header">${bin} <span style="float:right">${fmtR(b.total)}</span></div>`;
+    Object.entries(b.items).sort((a, b2) => b2[1] - a[1]).forEach(([cat, amt]) => {
+      ehtml += `<div class="line-item"><span class="desc">${cat}</span><span class="amt">${fmtR(amt)}</span></div>`;
+    });
+  });
+  if (bins.length) ehtml += `<div class="ledger-row total"><span class="label">Total Expenses</span><span class="amt">${fmtR(etotal)}</span></div>`;
   document.getElementById('expenseSub').textContent = present.length ? (period === 'day' ? fmtDate(start) : fmtDate(start) + ' \u2013 ' + fmtDate(end)) : '';
-  document.getElementById('expenseBody').innerHTML = ehtml;
-
-  // Day view also shows full itemized lists instead of grouped totals
-  if (period === 'day' && present.length) {
-    renderDayItems(start);
-  }
-}
-
-function renderDayItems(date) {
-  // Override grouped view with per-line-item lists for the single day
-  const cRows = credits.filter(r => r.date === date);
-  let chtml = cRows.length ? '' : '<div class="text-muted" style="font-size:0.82rem;padding:8px 2px">No credit entries</div>';
-  cRows.forEach(r => {
-    const recv = r.type !== 'credit';
-    chtml += `<div class="line-item"><span class="desc">${r.party_name}${recv ? ' <span class="badge badge-green" style="font-size:0.55rem">PAYMENT</span>' : ''}</span><span class="amt ${recv ? 'text-green' : 'text-red'}">${recv ? '+' : ''}${fmtR(r.amount)}</span></div>`;
-  });
-  document.getElementById('creditBody').innerHTML = chtml;
-
-  const eRows = expenses.filter(r => r.date === date);
-  let ehtml = eRows.length ? '' : '<div class="text-muted" style="font-size:0.82rem;padding:8px 2px">No expenses</div>';
-  let etotal = 0;
-  eRows.forEach(r => { etotal += Number(r.amount) || 0; ehtml += `<div class="line-item"><span class="desc">${r.category}</span><span class="amt">${fmtR(r.amount)}</span></div>`; });
-  if (eRows.length) ehtml += `<div class="line-item" style="font-weight:700;border-top:1px solid var(--card-border);padding-top:8px"><span class="desc">Total</span><span class="amt">${fmtR(etotal)}</span></div>`;
   document.getElementById('expenseBody').innerHTML = ehtml;
 }
 
 function renderTrend(present, start, end) {
   const L = ledgerByDate();
-  // For day view, show last 14 days ending at anchor; for week/month show each day in period
   let days;
   if (period === 'day') {
     days = [];
@@ -496,11 +687,11 @@ function exportPeriod(tag) {
   const L = ledgerByDate();
   const present = dates.filter(d => L[d]);
   const a = agg(present);
-  const net = a.income - a.exp;
+  const gross = a.income - a.cogs;
+  const net = gross - a.exp;
   const label = period === 'day' ? start : start + '_to_' + end;
   const files = [];
 
-  // 1. Summary / P&L + Cash flow
   files.push({
     name: `pnl_cashflow_${label}.csv`,
     rows: [
@@ -512,6 +703,8 @@ function exportPeriod(tag) {
       ['MS Sales', a.ms],
       ['Other Income', a.other],
       ['Total Income', a.income],
+      ['COGS', a.cogs],
+      ['Gross Margin', gross],
       ['Total Expenses (Kharcha)', a.exp],
       ['Net Profit (P&L)', net],
       [''],
@@ -529,38 +722,39 @@ function exportPeriod(tag) {
     ]
   });
 
-  // 2. Daily detail within period
-  const dRows = [['Date', 'HSD Income', 'MS Income', 'Other Income', 'Total Income', 'Expenses', 'Credits Given', 'PhonePe', 'HDFC', 'Bank Deposit', 'Cash Picked', 'Opening Cash', 'Closing Cash']];
+  const dRows = [['Date', 'HSD Income', 'MS Income', 'Other Income', 'Total Income', 'COGS', 'Expenses', 'Credits Given', 'PhonePe', 'HDFC', 'Bank Deposit', 'Cash Picked', 'Opening Cash', 'Closing Cash']];
   present.forEach(d => {
     const r = L[d];
-    dRows.push([d, r.hsd_income || 0, r.ms_income || 0, (r.total_income || 0) - (r.hsd_income || 0) - (r.ms_income || 0), r.total_income || 0, r.total_expenses || 0, r.total_credit || 0, r.phonepe || 0, r.hdfc_card || 0, r.bank_deposit || 0, r.cash_picked || 0, r.yesterday_cash || 0, r.total_cash || 0]);
+    const cg = cogsForDay(d);
+    dRows.push([d, r.hsd_income || 0, r.ms_income || 0, (r.total_income || 0) - (r.hsd_income || 0) - (r.ms_income || 0), r.total_income || 0, cg ? Math.round(cg.total) : 0, r.total_expenses || 0, r.total_credit || 0, r.phonepe || 0, r.hdfc_card || 0, r.bank_deposit || 0, r.cash_picked || 0, r.yesterday_cash || 0, r.total_cash || 0]);
   });
   files.push({ name: `daily_detail_${label}.csv`, rows: dRows });
 
-  // 3. Line items
   const cRows = [['Date', 'Party', 'Type', 'Amount']];
   credits.filter(c => c.date >= start && c.date <= end).forEach(c => cRows.push([c.date, c.party_name, c.type, c.amount]));
   files.push({ name: `credits_${label}.csv`, rows: cRows });
 
-  const eRows = [['Date', 'Category', 'Amount']];
-  expenses.filter(e => e.date >= start && e.date <= end).forEach(e => eRows.push([e.date, e.category, e.amount]));
+  const eRows = [['Date', 'Category', 'Bin', 'Amount']];
+  expenses.filter(e => e.date >= start && e.date <= end).forEach(e => eRows.push([e.date, e.category, categorize(e.category), e.amount]));
   files.push({ name: `expenses_${label}.csv`, rows: eRows });
 
-  if (files.length === 1) downloadCsv(files[0].name, files[0].rows);
-  else files.forEach(f => downloadCsv(f.name, f.rows));
+  files.forEach(f => downloadCsv(f.name, f.rows));
 }
 
 function exportDaily(tag) {
   const L = ledgerByDate();
-  const rows = [['Date', 'HSD Income', 'MS Income', 'Other Income', 'Total Income', 'Expenses', 'Credits Given', 'PhonePe', 'HDFC', 'Bank Deposit', 'Cash Picked', 'Opening Cash', 'Closing Cash', 'Net (P&L)']];
-  ledger.forEach(r => rows.push([
-    r.date, r.hsd_income || 0, r.ms_income || 0,
-    (r.total_income || 0) - (r.hsd_income || 0) - (r.ms_income || 0),
-    r.total_income || 0, r.total_expenses || 0, r.total_credit || 0,
-    r.phonepe || 0, r.hdfc_card || 0, r.bank_deposit || 0, r.cash_picked || 0,
-    r.yesterday_cash || 0, r.total_cash || 0,
-    (r.total_income || 0) - (r.total_expenses || 0)
-  ]));
+  const rows = [['Date', 'HSD Income', 'MS Income', 'Other Income', 'Total Income', 'COGS', 'Expenses', 'Credits Given', 'PhonePe', 'HDFC', 'Bank Deposit', 'Cash Picked', 'Opening Cash', 'Closing Cash', 'Net (P&L)']];
+  ledger.forEach(r => {
+    const cg = cogsForDay(r.date);
+    rows.push([
+      r.date, r.hsd_income || 0, r.ms_income || 0,
+      (r.total_income || 0) - (r.hsd_income || 0) - (r.ms_income || 0),
+      r.total_income || 0, cg ? Math.round(cg.total) : 0, r.total_expenses || 0, r.total_credit || 0,
+      r.phonepe || 0, r.hdfc_card || 0, r.bank_deposit || 0, r.cash_picked || 0,
+      r.yesterday_cash || 0, r.total_cash || 0,
+      (r.total_income || 0) - (r.total_expenses || 0)
+    ]);
+  });
   downloadCsv(`all_days_${tag}.csv`, rows);
 }
 
@@ -571,8 +765,8 @@ function exportCredits(tag) {
 }
 
 function exportExpenses(tag) {
-  const rows = [['Date', 'Category', 'Amount']];
-  expenses.forEach(e => rows.push([e.date, e.category, e.amount]));
+  const rows = [['Date', 'Category', 'Bin', 'Amount']];
+  expenses.forEach(e => rows.push([e.date, e.category, categorize(e.category), e.amount]));
   downloadCsv(`all_expenses_${tag}.csv`, rows);
 }
 
