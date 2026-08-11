@@ -490,16 +490,19 @@ function agg(present) {
     if (c.date < start || c.date > end) return;
     if (c.type === 'payment' || c.type === 'debit') creditRepaid += Number(c.amount) || 0;
   });
-  // OTHER INCOME = REAL lube sales only (lubricant_sales table). The OCR ledger's
-  // residual over IRAS revenue is NOT income — it's an OCR accounting gap
-  // (verified: Jul 2026 residual ₹3.9L with ₹0 real lube, ₹0 repayments).
+  // OTHER INCOME = REAL lube sales only (lubricant_sales table).
   lubeSales.forEach(x => { if (x.date >= start && x.date <= end) other += Number(x.amount) || 0; });
-  // Unreconciled OCR-vs-IRAS income gap (informational — flagged, not revenue)
-  const ocrGap = Math.max(0, ledgerInc - hsd - ms - creditRepaid - other);
+  // Residual = cash inflow per the hisaab beyond fuel revenue + lube. The hisaab is
+  // a CASH-FLOW statement — its income line includes udhar repayments (and any other
+  // cash received), which are NOT P&L revenue. This residual is the repayments the
+  // hisaab recorded; it should match credit_ledger type=payment/debit, so a large
+  // value here with low creditRepaid means repayments were never logged in
+  // credit_ledger (data gap to fix, not an OCR error).
+  const nonFuelCashIn = Math.max(0, ledgerInc - hsd - ms - creditRepaid - other);
   const opening = present.length ? (L[present[0]].yesterday_cash || 0) : 0;
   const closing = present.length ? (L[present[present.length-1]].total_cash || 0) : 0;
   const revenue = hsd + ms + other;
-  return { hsd, ms, other, ocrGap, creditRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL };
+  return { hsd, ms, other, nonFuelCashIn, creditRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL };
 }
 
 function renderSummary(present) {
@@ -542,8 +545,9 @@ function renderPnl(present) {
     <div class="ledger-row total"><span class="label">Gross Margin</span><span class="amt ${gross >= 0 ? 'text-green' : 'text-red'}">${fmtR(gross)}</span></div>
     <div class="ledger-row"><span class="label">Total Expenses (Kharcha)</span><span class="amt text-red">&minus;${fmtR(a.exp)}</span></div>
     <div class="ledger-row total pnl-net ${net >= 0 ? 'positive' : 'negative'}"><span class="label">Net Profit (P&amp;L)</span><span class="amt">${fmtR(net)}</span></div>`;
-  if (a.ocrGap > 500) {
-    html += `<div class="warn">\u26A0\uFE0F Ledger reports ${fmtR(a.ocrGap)} more income than IRAS fuel sales + lube + repayments — likely OCR accounting errors in this period.</div>`;
+  if (a.nonFuelCashIn > 500) {
+    const unlogged = a.nonFuelCashIn - a.creditRepaid;
+    html += `<div class="warn">\u2139\uFE0F Cash in (hisaab) exceeds fuel + lube revenue by ${fmtR(a.nonFuelCashIn)} — udhar repayments / other cash received, NOT P&amp;L income. ${unlogged > 500 ? 'Of this, ' + fmtR(unlogged) + ' has no matching credit_ledger repayment entry (repayments not logged?).' : 'All accounted for in credit_ledger repayments.'}</div>`;
   }
   el.innerHTML = html;
 }
@@ -876,7 +880,7 @@ function exportPeriod(tag) {
       ['HSD Sales', a.hsd],
       ['MS Sales', a.ms],
       ['Other Income (lube sales)', a.other],
-      ['OCR Recon Gap (not income)', a.ocrGap],
+      ['Udhar repayments / other cash-in (not P&L income)', a.nonFuelCashIn],
       ['Total Income (IRAS revenue)', a.income],
       ['COGS', a.cogs],
       ['Gross Margin', gross],
