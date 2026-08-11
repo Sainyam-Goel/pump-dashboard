@@ -536,16 +536,27 @@ function renderPnl(present) {
   const gross = a.income - a.cogs;
   const net = gross - a.exp;
   const el = document.getElementById('pnlBody');
+  // Per-liter cost = retail rate − dealer margin, using the rate in force at the
+  // period end (May 25+ = MS 102.48/HSD 95.14, margins 4.00/2.58).
+  let hsdCost = 0, msCost = 0;
+  if (present.length) {
+    const lastD = present[present.length - 1];
+    const rt = rateOn(lastD);
+    const m = marginOn(lastD);
+    if (rt.hsd) hsdCost = rt.hsd - m.hsd;
+    if (rt.ms) msCost = rt.ms - m.ms;
+  }
   let html = `
     <div class="ledger-row"><span class="label">HSD Sales</span><span class="amt text-green">${fmtR(a.hsd)}</span></div>
     <div class="ledger-row"><span class="label">MS Sales</span><span class="amt text-green">${fmtR(a.ms)}</span></div>`;
   if (a.other !== 0) html += `<div class="ledger-row"><span class="label">Other Income (lube sales)</span><span class="amt text-green">${fmtR(a.other)}</span></div>`;
   html += `
     <div class="ledger-row total"><span class="label">Total Income</span><span class="amt text-green">${fmtR(a.income)}</span></div>
-    <div class="ledger-row"><span class="label">COGS (${fmtL(a.hsdL)} HSD + ${fmtL(a.msL)} MS @ rate &minus; margin)</span><span class="amt text-orange">&minus;${fmtR(a.cogs)}</span></div>
+    <div class="ledger-row"><span class="label">COGS &mdash; ${fmtL(a.hsdL)} HSD @ ₹${hsdCost.toFixed(2)} + ${fmtL(a.msL)} MS @ ₹${msCost.toFixed(2)}</span><span class="amt text-orange">&minus;${fmtR(a.cogs)}</span></div>
     <div class="ledger-row total"><span class="label">Gross Margin</span><span class="amt ${gross >= 0 ? 'text-green' : 'text-red'}">${fmtR(gross)}</span></div>
     <div class="ledger-row"><span class="label">Total Expenses (Kharcha)</span><span class="amt text-red">&minus;${fmtR(a.exp)}</span></div>
     <div class="ledger-row total pnl-net ${net >= 0 ? 'positive' : 'negative'}"><span class="label">Net Profit (P&amp;L)</span><span class="amt">${fmtR(net)}</span></div>`;
+
   if (a.nonFuelCashIn > 500) {
     html += `<div class="warn">\u2139\uFE0F Cash-in exceeds fuel revenue by ${fmtR(a.nonFuelCashIn)} — udhar repayments (${fmtR(a.creditRepaid)} logged) or OCR overstatement. Cheque repayments go direct to bank.</div>`;
   }
