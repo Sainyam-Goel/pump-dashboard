@@ -195,9 +195,27 @@ const SUPABASE_URL = 'https://zkomggcvakdocbgrglkn.supabase.co/rest/v1';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inprb21nZ2N2YWtkb2NiZ3JnbGtuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4NjI5MjIsImV4cCI6MjA5MDQzODkyMn0.Ma3NTFbjiLk4iFN7jgA3jXWT7m3di6gayD3svsnwQpc';
 const HEADERS = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` };
 
-// Dealer margins (from Apr 2026 IOCL invoices, same as iras-analytics money())
-const MS_MARGIN = 3.94;
-const HSD_MARGIN = 2.56;
+// Dealer margins by price period — VERIFIED from 33 IOCL invoice line items
+// (local invoice PDFs: 7004824057 … 7009672342). Margins = retail − invoice cost.
+//   Apr 1 – May 16: MS 3.94 / HSD 2.56   (retail 95.16 / 87.61)
+//   May 17–18:      MS ~3.97 / HSD ~2.57 (retail 98.15 / 90.61, interpolated)
+//   May 19–22:      MS 3.97 / HSD 2.57   (retail 99.02 / 91.52, invoice 7006745468)
+//   May 23–24:      MS ~3.98 / HSD ~2.58 (retail 99.88 / 92.43, interpolated)
+//   May 25+:        MS 4.00 / HSD 2.58   (retail 102.48 / 95.14, invoice 7007022804+)
+const MARGIN_STEPS = [
+  { until: '2026-05-16', ms: 3.94, hsd: 2.56 },
+  { until: '2026-05-18', ms: 3.97, hsd: 2.57 },
+  { until: '2026-05-22', ms: 3.97, hsd: 2.57 },
+  { until: '2026-05-24', ms: 3.98, hsd: 2.58 },
+  { until: '9999-12-31', ms: 4.00, hsd: 2.58 },
+];
+
+function marginOn(date) {
+  for (const step of MARGIN_STEPS) {
+    if (date <= step.until) return { ms: step.ms, hsd: step.hsd };
+  }
+  return { ms: 4.00, hsd: 2.58 };
+}
 
 let period = 'day';
 let anchor = null;
@@ -343,15 +361,16 @@ function rateOn(date) {
   return { ms, hsd };
 }
 
-// COGS for a day: liters (shift) × (retail rate − dealer margin)
+// COGS for a day: liters (shift) × (retail rate − date-aware dealer margin)
 function cogsForDay(date) {
   const r = rateOn(date);
   if (!r.ms && !r.hsd) return null;
+  const m = marginOn(date);
   const t = shiftTotals.find(x => x.shift_date === date);
   const hsdL = Number(t && t.hsd_liters) || 0;
   const msL = Number(t && t.ms_liters) || 0;
-  const msCogs = r.ms ? msL * (r.ms - MS_MARGIN) : 0;
-  const hsdCogs = r.hsd ? hsdL * (r.hsd - HSD_MARGIN) : 0;
+  const msCogs = r.ms ? msL * (r.ms - m.ms) : 0;
+  const hsdCogs = r.hsd ? hsdL * (r.hsd - m.hsd) : 0;
   return { hsd_l: hsdL, ms_l: msL, hsd: hsdCogs, ms: msCogs, total: msCogs + hsdCogs, rate_ms: r.ms, rate_hsd: r.hsd };
 }
 
