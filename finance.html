@@ -309,27 +309,25 @@ async function rpc(name, body = {}) {
 
 async function loadAll() {
   try {
-    const [l, c, e, s, cc, fr, txns] = await Promise.all([
+    const [l, c, e, s, cc, fr] = await Promise.all([
       query('daily_ledger', 'order=date.asc&select=date,hsd_income,ms_income,total_income,yesterday_cash,total_cash,phonepe,hdfc_card,bank_deposit,cash_picked,total_credit,total_expenses'),
       query('credit_ledger', 'order=date.asc&select=date,party_name,type,amount'),
       query('expense_ledger', 'order=date.asc&select=date,category,amount'),
       query('settlements', 'order=date.asc&select=date,source,amount,transactions'),
       query('cc_transactions', 'order=date.asc&select=date,batch_no,transactions,gross_amount,msf,net_payable'),
       query('fuel_rates', 'order=date.asc&select=date,petrol_rate,diesel_rate'),
-      query('iras_transactions', 'payment_code=eq.1&select=date,quantity,product&order=date.asc&limit=50000'),
     ]);
     ledger = l; credits = c; expenses = e; settlements = s; ccTxns = cc; fuelRates = fr;
-    // Calendar-day liters: sum payment_code=1 transactions per day per product.
-    // This matches the daily_ledger income frame (calendar day) — verified against
-    // nozzle-diff ground truth (±2%). The 9AM→9AM shift RPC bleeds into adjacent
-    // days and misaligns with income, so it is NOT used for COGS.
-    dayLiters = {};
-    txns.forEach(t => {
-      if (!dayLiters[t.date]) dayLiters[t.date] = { ms_l: 0, hsd_l: 0 };
-      const q = Number(t.quantity) || 0;
-      if (t.product === 'MS') dayLiters[t.date].ms_l += q;
-      else dayLiters[t.date].hsd_l += q;
-    });
+    // Calendar-day liters from the daily_sales_liters RPC (server-side aggregation,
+    // matches the daily_ledger income frame). NOTE: the 9AM→9AM shift RPC
+    // (iss_shift_totals) bleeds into adjacent days and is NOT used for COGS.
+    try {
+      const first = ledger.length ? ledger[0].date : '2026-02-08';
+      const last = ledger.length ? ledger[ledger.length - 1].date : new Date().toLocaleDateString('en-CA');
+      const dlRows = await rpc('daily_sales_liters', { from_date: first, to_date: last });
+      dayLiters = {};
+      dlRows.forEach(t => { dayLiters[t.sale_date] = { ms_l: Number(t.ms_liters) || 0, hsd_l: Number(t.hsd_liters) || 0 }; });
+    } catch (err) { console.warn('daily_sales_liters:', err); dayLiters = {}; }
     try { shiftTotals = await rpc('iss_shift_totals', {}); } catch (err) { console.warn('iss_shift_totals:', err); shiftTotals = []; }
     try { padData = await query('pad_balance', 'order=date.desc&limit=200'); } catch (err) { padData = null; console.warn('pad_balance table not available:', err); }
     latestDate = ledger.length ? ledger[ledger.length - 1].date : null;
