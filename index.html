@@ -438,6 +438,14 @@ async function loadCashCredits() {
     const diff = currCash - prevCash;
     document.getElementById('cashSub').innerHTML = `Yesterday: ${fmtR(prevCash)} <span style="color:${diff >= 0 ? 'var(--green)' : 'var(--red)'}">(${diff >= 0 ? '+' : ''}${fmtR(diff)})</span>`;
   }
+  // Freshness note: ledger may lag IRAS (OCR data not yet entered) — surface it
+  // instead of silently showing a stale cash figure next to fresh sales.
+  const todayISO = new Date().toLocaleDateString('en-CA');
+  const daysStale = Math.round((new Date(todayISO) - new Date(today.date)) / 86400000);
+  if (daysStale >= 1) {
+    document.getElementById('cashDate').innerHTML = fmtDate(today.date) + ' (Ledger)' +
+      ` <span class="badge ${daysStale >= 3 ? 'badge-red' : 'badge-orange'}" style="font-size:0.55rem">${daysStale}d stale</span>`;
+  }
 
   document.getElementById('todayCredit').textContent = fmtR(today.total_credit);
   document.getElementById('todayExpenses').textContent = fmtR(today.total_expenses);
@@ -466,8 +474,15 @@ async function loadTanks() {
     document.getElementById(prefix).textContent = Math.round(v) + ' L';
     document.getElementById(barId).style.width = pct + '%';
     document.getElementById(pctId).textContent = Math.round(pct) + '%';
-    if (water && Number(water) > 0) document.getElementById(waterId).textContent = 'Water: ' + water + 'mm';
-    else document.getElementById(waterId).textContent = '';
+    const w = Number(water) || 0;
+    if (w > 0) {
+      document.getElementById(waterId).textContent = 'Water: ' + w + 'mm';
+      document.getElementById(waterId).classList.add('text-orange');
+      if (w > 5) warnings.push(`${prefix === 'msVol' ? 'MS' : prefix === 'hsdT1Vol' ? 'HSD T1' : 'HSD T2'} water high: ${w}mm`);
+    } else {
+      document.getElementById(waterId).textContent = '';
+      document.getElementById(waterId).classList.remove('text-orange');
+    }
     if (v < LOW_FUEL) warnings.push(`${prefix === 'msVol' ? 'MS' : prefix === 'hsdT1Vol' ? 'HSD T1' : 'HSD T2'} tank low: ${fmt(v)}L`);
   }
 
@@ -685,13 +700,17 @@ async function loadNozzles() {
     const yVal = readYesterday(n.id);
     const diff = (!mixed && tVal != null && yVal != null) ? tVal - yVal : null;
     const srcBadge = `<span class="badge ${todaySrc === 'IRAS' ? 'badge-blue' : 'badge-purple'}" style="font-size:0.55rem;vertical-align:middle">${todaySrc}</span>`;
+    // Stale-duplicate guard: a zero-movement day means the capture returned the
+    // same totalizer as the previous day (FCC shift-close miss) — show it as
+    // "no new reading" instead of a confusing "+0 L sold".
+    const stale = (diff != null && Math.abs(diff) < 0.5);
+    const diffLabel = stale ? 'No new reading (capture miss)' : (diff != null ? (diff > 0 ? '+' : '') + fmt(diff) + ' L sold' : (tVal == null ? 'No data' : (mixed ? 'Source change \u2014 diff not shown' : 'Incomplete data')));
+    const diffClass = stale ? 'text-muted' : (diff != null ? (diff > 0 ? 'text-green' : 'text-red') : 'text-muted');
     html += `<div class="nozzle-card">
       <div class="nozzle-name" style="color:${n.color}">${n.label} ${srcBadge}</div>
       <div class="nozzle-reading">${tVal != null ? fmt(tVal) : '--'}</div>
       <div style="font-size:0.72rem;color:var(--muted);margin-top:4px">Yesterday: ${yVal != null ? fmt(yVal) : '--'}</div>
-      <div class="nozzle-diff ${diff != null ? (diff > 0 ? 'text-green' : 'text-red') : 'text-muted'}">
-        ${diff != null ? (diff > 0 ? '+' : '') + fmt(diff) + ' L sold' : (tVal == null ? 'No data' : (mixed ? 'Source change \u2014 diff not shown' : 'Incomplete data'))}
-      </div>
+      <div class="nozzle-diff ${diffClass}">${diffLabel}</div>
     </div>`;
   });
   document.getElementById('nozzleGrid').innerHTML = html;
