@@ -463,6 +463,7 @@ function agg(present) {
   const L = ledgerByDate();
   let hsd = 0, ms = 0, other = 0, ledgerInc = 0, exp = 0, credit = 0, pp = 0, hdfc = 0, bank = 0, picked = 0;
   let cogsTotal = 0, hsdL = 0, msL = 0;
+  let creditRepaid = 0;
   present.forEach(d => {
     const r = L[d];
     if (r) {
@@ -477,14 +478,23 @@ function agg(present) {
     const st = shiftTotals.find(x => x.shift_date === d);
     if (st && st.hsd_income != null) hsd += Number(st.hsd_income);
     if (st && st.ms_income != null) ms += Number(st.ms_income);
+    // Credit repayments (udhar received back) — cash inflow but NOT P&L revenue.
     const cg = cogsForDay(d);
     if (cg) { cogsTotal += cg.total; hsdL += cg.hsd_l; msL += cg.ms_l; }
   });
-  other = Math.max(0, ledgerInc - hsd - ms); // residual (lube/credit payments)
+  // Credit repayments in this period (from credit_ledger, type=payment/debit)
+  const { start, end } = periodRange();
+  credits.forEach(c => {
+    if (c.date < start || c.date > end) return;
+    if (c.type === 'payment' || c.type === 'debit') creditRepaid += Number(c.amount) || 0;
+  });
+  // OTHER INCOME = what the ledger counted beyond fuel revenue, MINUS credit repayments.
+  // (Repayments are cash-flow only; remaining residual ≈ lube sales + rounding.)
+  other = Math.max(0, ledgerInc - hsd - ms - creditRepaid);
   const opening = present.length ? (L[present[0]].yesterday_cash || 0) : 0;
   const closing = present.length ? (L[present[present.length-1]].total_cash || 0) : 0;
   const revenue = hsd + ms;
-  return { hsd, ms, other, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL };
+  return { hsd, ms, other, creditRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL };
 }
 
 function renderSummary(present) {
@@ -520,7 +530,7 @@ function renderPnl(present) {
   let html = `
     <div class="ledger-row"><span class="label">HSD Sales</span><span class="amt text-green">${fmtR(a.hsd)}</span></div>
     <div class="ledger-row"><span class="label">MS Sales</span><span class="amt text-green">${fmtR(a.ms)}</span></div>`;
-  if (a.other !== 0) html += `<div class="ledger-row"><span class="label">Other Income (lube/credit payments)</span><span class="amt text-green">${fmtR(a.other)}</span></div>`;
+  if (a.other !== 0) html += `<div class="ledger-row"><span class="label">Other Income (lube etc.)</span><span class="amt text-green">${fmtR(a.other)}</span></div>`;
   html += `
     <div class="ledger-row total"><span class="label">Total Income</span><span class="amt text-green">${fmtR(a.income)}</span></div>
     <div class="ledger-row"><span class="label">COGS (${fmtL(a.hsdL)} HSD + ${fmtL(a.msL)} MS @ rate &minus; margin)</span><span class="amt text-orange">&minus;${fmtR(a.cogs)}</span></div>
@@ -532,20 +542,17 @@ function renderPnl(present) {
 
 function renderCashFlow(present) {
   const a = agg(present);
-  // Udhar received back during the period (payments/debits)
-  const { start, end } = periodRange();
-  let udharRecv = 0;
-  credits.forEach(r => {
-    if (r.date < start || r.date > end) return;
-    if (r.type === 'payment' || r.type === 'debit') udharRecv += Number(r.amount) || 0;
-  });
+  // Udhar received back during the period (payments/debits). The ledger's
+  // total_income already INCLUDES these repayments (OCR counts them as income),
+  // so we subtract them from ledger income, then show repayments as their own line.
   const el = document.getElementById('cfBody');
-  const expected = a.opening + a.ledgerInc + udharRecv - a.pp - a.hdfc - a.bank - a.picked - a.credit - a.exp;
+  const cfIncome = a.ledgerInc - a.creditRepaid;
+  const expected = a.opening + cfIncome + a.creditRepaid - a.pp - a.hdfc - a.bank - a.picked - a.credit - a.exp;
   const diff = Math.round((expected - a.closing) * 100) / 100;
   let html = `
     <div class="ledger-row"><span class="label">Opening Cash</span><span class="amt">${fmtR(a.opening)}</span></div>
-    <div class="ledger-row"><span class="label">+ Income (ledger)</span><span class="amt text-green">+${fmtR(a.ledgerInc)}</span></div>
-    <div class="ledger-row"><span class="label">+ Udhar Received Back</span><span class="amt text-green">+${fmtR(udharRecv)}</span></div>
+    <div class="ledger-row"><span class="label">+ Income (ledger, excl. repayments)</span><span class="amt text-green">+${fmtR(cfIncome)}</span></div>
+    <div class="ledger-row"><span class="label">+ Udhar Received Back</span><span class="amt text-green">+${fmtR(a.creditRepaid)}</span></div>
     <div class="ledger-row"><span class="label">&minus; PhonePe Settlement</span><span class="amt text-red">&minus;${fmtR(a.pp)}</span></div>
     <div class="ledger-row"><span class="label">&minus; HDFC / Card Settlement</span><span class="amt text-red">&minus;${fmtR(a.hdfc)}</span></div>
     <div class="ledger-row"><span class="label">&minus; Bank Deposit</span><span class="amt text-red">&minus;${fmtR(a.bank)}</span></div>
@@ -860,7 +867,7 @@ function exportPeriod(tag) {
       ['PROFIT & LOSS'],
       ['HSD Sales', a.hsd],
       ['MS Sales', a.ms],
-      ['Other Income', a.other],
+      ['Other Income (lube, excl. credit repayments)', a.other],
       ['Total Income (IRAS revenue)', a.income],
       ['COGS', a.cogs],
       ['Gross Margin', gross],
@@ -869,7 +876,8 @@ function exportPeriod(tag) {
       [''],
       ['CASH FLOW'],
       ['Opening Cash', a.opening],
-      ['+ Income (ledger)', a.ledgerInc],
+      ['+ Income (ledger, excl. repayments)', a.ledgerInc - a.creditRepaid],
+      ['+ Udhar Received Back', a.creditRepaid],
       ['- PhonePe Settlement', a.pp],
       ['- HDFC / Card Settlement', a.hdfc],
       ['- Bank Deposit', a.bank],
