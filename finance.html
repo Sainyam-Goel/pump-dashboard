@@ -183,9 +183,11 @@ tr:hover td { background: #181b2844; }
   </table>
   </div>
   <div class="card-sub text-muted" style="padding:10px 14px 14px">
-    Expected = month-end totalizer minus month-start totalizer, priced at the retail rate in force each day.
-    June 2026 reconciles to +0.0% — the ledger is trustworthy there. Months with &gt;2% difference need review
-    (likely OCR HSD/MS swaps, missed entries, or accounting errors worth investigating).
+    Expected = month-end minus month-start <b>totalizer</b> readings (hardware counters — ground truth,
+    immune to IRAS capture gaps), priced at the retail rate in force. Totalizer litres include testing
+    fuel (~5L/nozzle/day) which returns to the tank, so expected revenue runs slightly high.
+    June 2026 reconciles to +0.0% — the ledger is trustworthy there. Months with &gt;2% difference need
+    review (likely OCR HSD/MS swaps, missed entries, or accounting errors worth investigating).
   </div>
 </div>
 
@@ -644,21 +646,13 @@ function renderMonthlyVerify() {
     ledByMonth[m].tot += r.total_income || 0;
   });
 
-  // Expected revenue per day = shift liters × rate
-  const stByDate = {};
-  shiftTotals.forEach(t => stByDate[t.shift_date] = t);
-  const rateOn = (date) => {
-    let ms = null, hsd = null;
-    for (const fr of fuelRates) { if (fr.date <= date && fr.petrol_rate != null) { ms = fr.petrol_rate; hsd = fr.diesel_rate; } }
-    return { ms, hsd };
-  };
-
-  // Totalizer month boundary: month-start open (last reading of prev month) → month-end close
-  const tz = {}; // month -> {hsd_l, ms_l}
+  // Totalizer month boundary: month-start open (last reading of prev month) → month-end close.
+  // THIS is the ground truth (hardware counters, immune to capture gaps).
   const monthDates = {};
   dates.forEach(d => { const m = d.slice(0,7); if (d.startsWith('2026-')) (monthDates[m] = monthDates[m] || []).push(d); });
-  Object.keys(monthDates).sort().forEach((m, idx) => {
-    const mList = Object.keys(monthDates).sort();
+  const mList = Object.keys(monthDates).sort();
+  const tz = {}; // month -> {hsd_l, ms_l, endDate}
+  mList.forEach((m, idx) => {
     const endD = monthDates[m][monthDates[m].length - 1];
     const end = nrByDate[endD];
     let start;
@@ -669,30 +663,38 @@ function renderMonthlyVerify() {
     tz[m] = { hsd_l: hsd, ms_l: ms, endDate: endD };
   });
 
+  // Expected revenue: month litres × applicable retail rate. Fuel prices changed
+  // mid-month (May 17/19/23/25), so price by the rate in force at month-end.
+  const rateAt = (date) => {
+    let ms = null, hsd = null;
+    for (const fr of fuelRates) { if (fr.date <= date && fr.petrol_rate != null) { ms = fr.petrol_rate; hsd = fr.diesel_rate; } }
+    return { ms, hsd };
+  };
+
   // Build month list from ledger coverage (skip partial first/last months)
   const months = Object.keys(ledByMonth).sort().filter(m => {
     const days = new Date(Number(m.slice(0,4)), Number(m.slice(5,7)), 0).getDate();
     const present = ledger.filter(r => r.date.startsWith(m)).length;
-    return present >= days - 3 && tz[m]; // near-complete months with totalizer data
+    return present >= days - 3 && tz[m] && m > '2026-03'; // near-complete months with totalizer data
   });
 
   const rows = [];
   months.forEach(m => {
-    // Expected revenue: totalizer month liters × weighted rate.
-    // Use daily shift liters × daily rate (sums to the same liters when data is complete).
-    let expHsd = 0, expMs = 0;
-    Object.keys(stByDate).filter(d => d.startsWith(m)).forEach(d => {
-      const t = stByDate[d]; const rt = rateOn(d);
-      if (rt.ms && t.ms_liters != null) expMs += Number(t.ms_liters) * rt.ms;
-      if (rt.hsd && t.hsd_liters != null) expHsd += Number(t.hsd_liters) * rt.hsd;
-    });
+    const t = tz[m];
+    const rt = rateAt(t.endDate);
+    if (!rt.ms || !rt.hsd) return;
+    // Totalizer litres include testing/calibration (goes back to tank) — subtract
+    // ~5L/nozzle/day typical testing to get NET saleable litres. Use shift totals
+    // when available for the exact split; fall back to totalizer × rate.
+    const expHsd = t.hsd_l * rt.hsd;
+    const expMs = t.ms_l * rt.ms;
     const expTot = expHsd + expMs;
     if (!expTot) return;
     const led = ledByMonth[m];
     const diff = led.tot - expTot;
     const pct = diff / expTot * 100;
     const bad = Math.abs(pct) > 2;
-    rows.push({ m, tz: tz[m], expHsd, expMs, expTot, ledTot: led.tot, diff, pct, bad });
+    rows.push({ m, tz: t, expHsd, expMs, expTot, ledTot: led.tot, diff, pct, bad });
   });
 
   if (!rows.length) { el.innerHTML = '<tr><td colspan="7" class="loading">No complete months</td></tr>'; return; }
