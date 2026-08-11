@@ -546,8 +546,7 @@ function renderPnl(present) {
     <div class="ledger-row"><span class="label">Total Expenses (Kharcha)</span><span class="amt text-red">&minus;${fmtR(a.exp)}</span></div>
     <div class="ledger-row total pnl-net ${net >= 0 ? 'positive' : 'negative'}"><span class="label">Net Profit (P&amp;L)</span><span class="amt">${fmtR(net)}</span></div>`;
   if (a.nonFuelCashIn > 500) {
-    const unlogged = a.nonFuelCashIn - a.creditRepaid;
-    html += `<div class="warn">\u2139\uFE0F Cash in (hisaab) exceeds fuel + lube revenue by ${fmtR(a.nonFuelCashIn)} — udhar repayments / other cash received, NOT P&amp;L income. ${unlogged > 500 ? 'Of this, ' + fmtR(unlogged) + ' has no matching credit_ledger repayment entry (repayments not logged?).' : 'All accounted for in credit_ledger repayments.'}</div>`;
+    html += `<div class="warn">\u2139\uFE0F Hisaab cash-in exceeds IRAS fuel + lube revenue by ${fmtR(a.nonFuelCashIn)} — of which ${fmtR(a.creditRepaid)} is logged udhar repayment. The remainder is either small cash repayments (no party detail in hisaab) or OCR overstatement of fuel income (HSD/MS swap) — cheque repayments are NOT here (they go direct to bank, visible in bank statements).</div>`;
   }
   el.innerHTML = html;
 }
