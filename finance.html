@@ -579,14 +579,16 @@ function renderCashFlow(present) {
 
 function renderSettlements(start, end) {
   const L = ledgerByDate();
-  // Aggregate ledger claims vs settlement records per source for the period
+  // Aggregate ledger claims vs settlement records per source for the period.
+  // Settlements land ~1 day AFTER the sale (ledger day D settles on D or D+1),
+  // so compare ledger(D) against settlements(D) + settlements(D+1).
+  const dates = daysInRange(start, end).filter(d => L[d]);
   const ppLedger = {}, hdfcLedger = {};
-  daysInRange(start, end).forEach(d => {
-    const r = L[d]; if (!r) return;
+  dates.forEach(d => {
+    const r = L[d];
     ppLedger[d] = r.phonepe || 0;
     hdfcLedger[d] = r.hdfc_card || 0;
   });
-  // Settlement records by source (phonepe / cc)
   const ppRec = {}, ccRec = {};
   settlements.forEach(s => {
     if (s.date < start || s.date > end) return;
@@ -598,9 +600,17 @@ function renderSettlements(start, end) {
   const ccNet = {};
   ccTxns.forEach(t => { if (t.date >= start && t.date <= end) ccNet[t.date] = (ccNet[t.date] || 0) + Number(t.net_payable || 0); });
 
-  const dates = daysInRange(start, end).filter(d => L[d]);
+  const dayAfter = (d) => { const dt = new Date(d + 'T12:00:00'); dt.setDate(dt.getDate() + 1); return dt.toISOString().slice(0, 10); };
   const sum = o => Object.values(o).reduce((a, b) => a + b, 0);
-  const ppL = sum(ppLedger), ppS = sum(ppRec);
+  const ppL = sum(ppLedger);
+  // Ledger(D) vs settlements(D or D+1) — absorbs the 1-day bank lag
+  let ppMatched = 0;
+  dates.forEach(d => {
+    const amt = ppLedger[d];
+    const sToday = ppRec[d] || 0;
+    const sNext = ppRec[dayAfter(d)] || 0;
+    ppMatched += Math.min(amt, sToday) + Math.max(0, Math.min(amt - sToday, sNext));
+  });
   const hdL = sum(hdfcLedger), ccS = sum(ccRec), ccN = sum(ccNet);
 
   const el = document.getElementById('settlementBody');
@@ -610,11 +620,17 @@ function renderSettlements(start, end) {
     return `<div class="line-item"><span class="desc">${label}</span><span class="amt">${fmtR(ledgerAmt)} <span class="text-muted">vs</span> ${fmtR(actualAmt)} <span class="${cls}">(${diff >= 0 ? '+' : ''}${fmtR(diff)})</span></span></div>`;
   };
 
+  // Coverage: how many of the period's settlement dates have records at all?
+  const ppCoverage = dates.filter(d => (ppRec[d] || 0) > 0).length;
+  const coverageNote = ppCoverage === 0
+    ? ' <span class="badge badge-red" style="font-size:0.55rem">NO settlement records in period — pipeline may have been down</span>'
+    : (ppCoverage < dates.length * 0.5 ? ' <span class="badge badge-orange" style="font-size:0.55rem">partial settlement records</span>' : '');
+
   let html = '';
-  html += row('PhonePe &mdash; ledger vs settlements', ppL, ppS, '');
+  html += row('PhonePe &mdash; ledger vs settlements (D/D+1)', ppL, ppMatched, '') + coverageNote;
   html += row('HDFC/Card &mdash; ledger vs cc_transactions', hdL, ccN, '');
   html += row('HDFC/Card &mdash; ledger vs settlements(src=cc)', hdL, ccS, '');
-  html += `<div class="card-sub text-muted" style="margin-top:8px">Ledger ${fmtDate(start)} &rarr; ${fmtDate(end)}. Settlement records ${dates.length} days checked.</div>`;
+  html += `<div class="card-sub text-muted" style="margin-top:8px">Ledger ${fmtDate(start)} &rarr; ${fmtDate(end)}. PhonePe matched with 1-day bank lag; ${ppCoverage}/${dates.length} days have settlement records.</div>`;
   el.innerHTML = html;
 }
 
