@@ -81,7 +81,7 @@ tr:hover td { background: #181b2844; }
   .summary-row { grid-template-columns: 1fr; }
   .grid-3 { grid-template-columns: 1fr; }
   .header { flex-direction: column; gap: 12px; }
-  #fuelRateBox div:first-child { justify-content: flex-start !important; }
+  .rate-row { justify-content: flex-start; }
   table { font-size: 0.75rem; }
   th, td { padding: 8px 8px; }
   .card { padding: 16px; }
@@ -127,7 +127,7 @@ if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginO
   </div>
   <div style="text-align:right">
     <div id="fuelRateBox" style="margin-bottom:6px">
-      <div style="display:flex;gap:14px;justify-content:flex-end;align-items:center">
+      <div class="rate-row" style="display:flex;gap:14px;justify-content:flex-end;align-items:center">
         <span style="font-size:0.65rem;font-weight:700;color:var(--petrol)">MS</span>
         <span style="font-weight:800;color:var(--petrol)" id="petrolRate">--</span>
         <span style="margin-left:4px;font-size:0.65rem;font-weight:700;color:var(--diesel)">HSD</span>
@@ -136,10 +136,12 @@ if (sessionStorage.getItem('pump_auth') === '1') document.getElementById('loginO
       <div style="font-size:0.7rem;color:var(--muted);margin-top:2px" id="rateDate"></div>
     </div>
     <button class="refresh-btn" onclick="loadAll()">Refresh</button>
+    <button class="refresh-btn" onclick="location.href='finance.html'" style="margin-left:6px">Finance</button>
   </div>
 </div>
 
 <div id="warnings" class="warning-bar"></div>
+<div id="loadErrors" class="warning-bar" style="border-color:#f8717133;background:linear-gradient(90deg,#f8717112,#f8717122);color:var(--red);display:none"></div>
 
 <div class="section-title">Financials <span id="financialsDate" class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0"></span></div>
 
@@ -361,33 +363,58 @@ let salesChart = null;
 let tankChart = null;
 let tankChartDays = 1;
 let allLedgerData = [];
+const loadErrors = [];
+
+// Run a loader, collect failures into the visible error bar
+async function safe(name, fn) {
+  try { await fn(); }
+  catch (e) { loadErrors.push(name); console.error(name + ' failed:', e); }
+}
 
 function fmt(n) { return n == null ? '--' : Number(n).toLocaleString('en-IN'); }
 function fmtR(n) { return n == null ? '--' : '\u20B9' + Number(n).toLocaleString('en-IN'); }
 function fmtDate(d) { if (!d) return '--'; const dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }); }
-function fmtTime(t) { if (!t) return ''; const parts = t.split(':'); let h = parseInt(parts[0]); const m = parts[1]; const ampm = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return h + ':' + m + ' ' + ampm; }
+function fmtTime(t) {
+  if (!t) return '';
+  const parts = String(t).split(':');
+  let h = parseInt(parts[0]);
+  if (isNaN(h)) return '';
+  const m = (parts[1] || '00').slice(0, 2);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return h + ':' + m + ' ' + ampm;
+}
 
 async function query(table, params = '') {
   const res = await fetch(`${SUPABASE_URL}/${table}?${params}`, { headers: HEADERS });
   return res.json();
 }
 
-async function loadSales() {
-  // Sales & revenue from IRAS — shift-based (9AM→9AM)
-  // shift_date = ledger date (end of shift). Apr 6 = Apr 5 9AM → Apr 6 9AM.
-  // Use latest date if it's yesterday or older; fall back to second-latest if latest is today
+let shiftSummaryPromise = null;
+let shiftSummaryDate = null;
+
+// Shared helper: latest complete shift date + its summary (9AM→9AM).
+// Cached per date so loadSales and loadIssActivity reuse one RPC call.
+async function getShiftSummary() {
   const dateRows = await query('iras_transactions', 'order=date.desc&limit=2&select=date');
-  if (!dateRows.length) return;
+  if (!dateRows.length) return null;
   const latest = dateRows[0].date;
   const todayISO = new Date().toLocaleDateString('en-CA');
   const shiftDate = (latest === todayISO && dateRows.length > 1) ? dateRows[1].date : latest;
 
-  const res = await fetch(`${SUPABASE_URL}/rpc/iss_shift_summary`, {
+  if (shiftSummaryPromise && shiftSummaryDate === shiftDate) return shiftSummaryPromise;
+  shiftSummaryDate = shiftDate;
+  shiftSummaryPromise = fetch(`${SUPABASE_URL}/rpc/iss_shift_summary`, {
     method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' },
     body: JSON.stringify({ shift_date: shiftDate })
-  });
-  const data = await res.json();
-  if (!data || !data.stats) return;
+  }).then(res => res.json()).then(d => ({ date: shiftDate, data: d }));
+  return shiftSummaryPromise;
+}
+
+async function loadSales() {
+  const summary = await getShiftSummary();
+  if (!summary || !summary.data || !summary.data.stats) return;
+  const { date: shiftDate, data } = summary;
   const s = data.stats;
 
   const prevDay = new Date(shiftDate + 'T12:00:00');
@@ -571,6 +598,18 @@ async function loadTanker() {
   const tDate = tracker.length ? tracker[0].date : null;
   const useUnloading = uDate && (!tDate || uDate >= tDate);
 
+  // Cross-check: if both tables have the SAME date, surface any disagreement
+  let crossNote = '';
+  if (uDate && tDate && uDate === tDate) {
+    const u = unloading[0], tr = tracker[0];
+    const msU = Number(u.ms_invoice) || 0, hsdU = Number(u.hsd_invoice) || 0;
+    const msT = Math.round(Number(tr.petrol_kl) * 1000), hsdT = Math.round(Number(tr.diesel_kl) * 1000);
+    const diffs = [];
+    if (msU > 0 && msT > 0 && Math.abs(msU - msT) > 50) diffs.push(`MS: ${fmt(msU)}L (offload) vs ${fmt(msT)}L (tracker)`);
+    if (hsdU > 0 && hsdT > 0 && Math.abs(hsdU - hsdT) > 50) diffs.push(`HSD: ${fmt(hsdU)}L (offload) vs ${fmt(hsdT)}L (tracker)`);
+    if (diffs.length) crossNote = ' | ⚠️ ' + diffs.join(', ');
+  }
+
   if (useUnloading) {
     const t = unloading[0];
     document.getElementById('tankerMS').textContent = t.ms_invoice > 0 ? fmt(t.ms_invoice) + 'L' : '--';
@@ -578,14 +617,14 @@ async function loadTanker() {
     const disc = [];
     if (t.ms_invoice > 0) disc.push(`MS: ${t.ms_discrepancy > 0 ? '+' : ''}${fmt(t.ms_discrepancy)}L`);
     if (t.hsd_invoice > 0) disc.push(`HSD: ${t.hsd_discrepancy > 0 ? '+' : ''}${fmt(t.hsd_discrepancy)}L`);
-    document.getElementById('tankerDate').textContent = fmtDate(t.date) + (disc.length ? ' | Disc: ' + disc.join(', ') : '');
+    document.getElementById('tankerDate').textContent = fmtDate(t.date) + (disc.length ? ' | Disc: ' + disc.join(', ') : '') + crossNote;
   } else if (tracker.length) {
     const t = tracker[0];
     const msL = Math.round(Number(t.petrol_kl) * 1000);
     const hsdL = Math.round(Number(t.diesel_kl) * 1000);
     document.getElementById('tankerMS').textContent = msL > 0 ? fmt(msL) + 'L' : '--';
     document.getElementById('tankerHSD').textContent = hsdL > 0 ? fmt(hsdL) + 'L' : '--';
-    document.getElementById('tankerDate').textContent = fmtDate(t.date) + ' | Invoice #' + t.invoice_no + ' (no offload data)';
+    document.getElementById('tankerDate').textContent = fmtDate(t.date) + ' | Invoice #' + t.invoice_no + ' (no offload data)' + crossNote;
   }
 }
 
@@ -613,8 +652,6 @@ async function loadNozzles() {
   const byDate = {};
   rows.forEach(r => { if (!byDate[r.date]) byDate[r.date] = {}; byDate[r.date][r.nozzle_id] = Number(r.reading); });
   const dates = Object.keys(byDate).sort().reverse();
-  const today = byDate[dates[0]] || {};
-  const yesterday = byDate[dates[1]] || {};
 
   const nozzles = [
     { id: 'NOZ11', label: 'HSD 1 (Road)', color: 'var(--diesel)' },
@@ -626,28 +663,42 @@ async function loadNozzles() {
   const ledgerRows = await query('daily_ledger', 'order=date.desc&limit=2&select=date,noz11_reading,noz15_reading,noz10_reading,noz14_reading');
   const ledgerToday = ledgerRows[0] || {};
   const ledgerYesterday = ledgerRows[1] || {};
+  const colMap = { 'NOZ11': 'noz11_reading', 'NOZ15': 'noz15_reading', 'NOZ10': 'noz10_reading', 'NOZ14': 'noz14_reading' };
+
+  // Source is chosen PER DAY, never per-nozzle: IRAS is authoritative for the
+  // dates it covers; OCR (daily_ledger) is used only when IRAS has NO readings
+  // for that date. Partial IRAS days show '--' for missing nozzles instead of
+  // silently substituting OCR readings (which would mix two sources).
+  const todayIras = byDate[dates[0]] || null;
+  const yestIras = byDate[dates[1]] || null;
+  const todaySrc = todayIras ? 'IRAS' : 'OCR';
+  const yestSrc = yestIras ? 'IRAS' : 'OCR';
+  const mixed = todaySrc !== yestSrc;
+
+  const readToday = (nid) => todayIras ? (todayIras[nid] != null ? todayIras[nid] : null) : (Number(ledgerToday[colMap[nid]]) || null);
+  const readYesterday = (nid) => yestIras ? (yestIras[nid] != null ? yestIras[nid] : null) : (Number(ledgerYesterday[colMap[nid]]) || null);
 
   // Show period: yesterday 9AM → today 9AM (totalizer diff period)
   const latestRows = rows.filter(r => r.date === dates[0]);
   const nozzleTime = latestRows.length && latestRows[0].time_str ? latestRows[0].time_str.slice(0,5) : '9AM';
   if (dates[1]) {
-    document.getElementById('nozzleDate').textContent = '\u2014 ' + fmtDate(dates[1]) + ' 9AM \u2192 ' + fmtDate(dates[0]) + ' 9AM';
+    document.getElementById('nozzleDate').textContent = '\u2014 ' + fmtDate(dates[1]) + ' 9AM \u2192 ' + fmtDate(dates[0]) + ' 9AM' + (mixed ? ' \u00B7 source changed' : '');
   } else {
     document.getElementById('nozzleDate').textContent = '\u2014 ' + fmtDate(dates[0]);
   }
 
   let html = '';
   nozzles.forEach(n => {
-    const colMap = { 'NOZ11': 'noz11_reading', 'NOZ15': 'noz15_reading', 'NOZ10': 'noz10_reading', 'NOZ14': 'noz14_reading' };
-    const tVal = today[n.id] || Number(ledgerToday[colMap[n.id]]) || null;
-    const yVal = yesterday[n.id] || Number(ledgerYesterday[colMap[n.id]]) || null;
-    const diff = (tVal && yVal) ? tVal - yVal : null;
+    const tVal = readToday(n.id);
+    const yVal = readYesterday(n.id);
+    const diff = (!mixed && tVal != null && yVal != null) ? tVal - yVal : null;
+    const srcBadge = `<span class="badge ${todaySrc === 'IRAS' ? 'badge-blue' : 'badge-purple'}" style="font-size:0.55rem;vertical-align:middle">${todaySrc}</span>`;
     html += `<div class="nozzle-card">
-      <div class="nozzle-name" style="color:${n.color}">${n.label}</div>
-      <div class="nozzle-reading">${tVal ? fmt(tVal) : '--'}</div>
-      <div style="font-size:0.72rem;color:var(--muted);margin-top:4px">Yesterday: ${yVal ? fmt(yVal) : '--'}</div>
+      <div class="nozzle-name" style="color:${n.color}">${n.label} ${srcBadge}</div>
+      <div class="nozzle-reading">${tVal != null ? fmt(tVal) : '--'}</div>
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:4px">Yesterday: ${yVal != null ? fmt(yVal) : '--'}</div>
       <div class="nozzle-diff ${diff != null ? (diff > 0 ? 'text-green' : 'text-red') : 'text-muted'}">
-        ${diff != null ? (diff > 0 ? '+' : '') + fmt(diff) + ' L sold' : 'No data'}
+        ${diff != null ? (diff > 0 ? '+' : '') + fmt(diff) + ' L sold' : (tVal == null ? 'No data' : (mixed ? 'Source change \u2014 diff not shown' : 'Incomplete data'))}
       </div>
     </div>`;
   });
@@ -700,7 +751,7 @@ async function loadIrasFreshness() {
     const el = document.getElementById('irasFreshness');
     if (!rows.length) { el.style.display = 'inline'; el.innerHTML = '<span style="color:var(--red)">IRAS: No data</span>'; return; }
     const lastDate = rows[0].date;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Date().toLocaleDateString('en-CA');
     const diffDays = Math.floor((new Date(today) - new Date(lastDate)) / 86400000);
     const dotColor = diffDays <= 1 ? 'var(--green)' : diffDays <= 3 ? 'var(--orange)' : 'var(--red)';
     const label = diffDays === 0 ? 'today' : diffDays === 1 ? '1d ago' : diffDays + 'd ago';
@@ -748,19 +799,9 @@ async function loadTestingFuel() {
 
 async function loadIssActivity() {
   try {
-    const dateRows = await query('iras_transactions', 'order=date.desc&limit=2&select=date');
-    if (!dateRows.length) return;
-    const latest = dateRows[0].date;
-    const todayISO = new Date().toLocaleDateString('en-CA');
-    const latestDate = (latest === todayISO && dateRows.length > 1) ? dateRows[1].date : latest;
-
-    const res = await fetch(`${SUPABASE_URL}/rpc/iss_shift_summary`, {
-      method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ shift_date: latestDate })
-    });
-    const data = await res.json();
-    if (!data || !data.stats) return;
-
+    const summary = await getShiftSummary();
+    if (!summary || !summary.data || !summary.data.stats) return;
+    const { date: latestDate, data } = summary;
     const s = data.stats;
     const totalTxns = Number(s.hsd_txns) + Number(s.ms_txns);
 
@@ -795,22 +836,43 @@ async function loadAudit() {
 
     document.getElementById('auditPeriod').textContent = '— last ' + rows.length + ' days';
 
-    const GAP_THRESHOLD = 200;
+    // Fetch tank levels so the gap threshold is calibration-aware (same rule
+    // as iras-analytics): strapping-curve error grows with level swing, so
+    // widen tolerance on tanker days / big level swings.
+    const TANK_CAP = 20000;
+    const startDate = rows[0].shift_date;
+    const tRes = await fetch(`${SUPABASE_URL}/tank_status?date=gte.${startDate}&order=date.asc&select=date,ms_volume,hsd_t1_volume,hsd_t2_volume`, { headers: HEADERS });
+    const tankRows = await tRes.json();
+    const levelsByDate = {};
+    tankRows.forEach(t => { levelsByDate[t.date] = { ms: Number(t.ms_volume) || 0, t1: Number(t.hsd_t1_volume) || 0, t2: Number(t.hsd_t2_volume) || 0 }; });
+
+    const swingPct = (cur, prev) => cur > 0 && prev > 0 ? Math.abs((cur - prev) / TANK_CAP * 100) : null;
+    const thresholdFor = (swing, recentTanker) => {
+      const base = swing == null ? 200 : (swing > 40 ? 250 : swing > 10 ? 150 : 40);
+      return recentTanker ? Math.max(base, 250) : base;
+    };
+
     let html = '';
-    rows.forEach(r => {
-      const hsdTank = r.hsd_tank_drop + r.hsd_tanker;
-      const msTank = r.ms_tank_drop + r.ms_tanker;
-      const hsdBad = Math.abs(r.hsd_gap) > GAP_THRESHOLD;
-      const msBad = Math.abs(r.ms_gap) > GAP_THRESHOLD;
+    rows.forEach((r, i) => {
+      const cur = levelsByDate[r.shift_date] || {};
+      const prev = i > 0 ? (levelsByDate[rows[i-1].shift_date] || {}) : (levelsByDate[r.shift_date] || {});
+      const msSwing = swingPct(cur.ms, prev.ms);
+      const hsdSwing = Math.max(swingPct(cur.t1, prev.t1) || 0, swingPct(cur.t2, prev.t2) || 0);
+      const recentTanker = rows.slice(Math.max(0, i-2), i+1).some(x => x.tanker_day) || r.tanker_day;
+
+      const hsdLim = thresholdFor(hsdSwing, recentTanker);
+      const msLim = thresholdFor(msSwing, recentTanker);
+      const hsdBad = Math.abs(r.hsd_gap) > hsdLim;
+      const msBad = Math.abs(r.ms_gap) > msLim;
       const tankerTag = r.tanker_day ? ' <span class="badge badge-blue" style="font-size:0.55rem">TANKER</span>' : '';
 
       html += `<tr>
         <td>${fmtDate(r.shift_date)}${tankerTag}</td>
         <td style="text-align:right">${fmt(r.hsd_totalizer)} L</td>
-        <td style="text-align:right">${fmt(hsdTank)} L</td>
+        <td style="text-align:right">${fmt(r.hsd_tank_drop + r.hsd_tanker)} L</td>
         <td style="text-align:right;font-weight:700" class="${hsdBad ? 'text-red' : 'text-green'}">${r.hsd_gap > 0 ? '+' : ''}${fmt(r.hsd_gap)}</td>
         <td style="text-align:right">${fmt(r.ms_totalizer)} L</td>
-        <td style="text-align:right">${fmt(msTank)} L</td>
+        <td style="text-align:right">${fmt(r.ms_tank_drop + r.ms_tanker)} L</td>
         <td style="text-align:right;font-weight:700" class="${msBad ? 'text-red' : 'text-green'}">${r.ms_gap > 0 ? '+' : ''}${fmt(r.ms_gap)}</td>
       </tr>`;
     });
@@ -831,7 +893,9 @@ async function loadSalesData() {
   const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowISO = tomorrow.toLocaleDateString('en-CA');
   const complete = data.filter(d => d.shift_date !== todayISO && d.shift_date !== tomorrowISO);
-  allLedgerData = complete.map(d => ({
+  // Cap history to 400 shifts (~13 months) — keeps weekly/monthly aggregation
+  // fast and bounds memory as the dataset grows forever.
+  allLedgerData = complete.slice(-400).map(d => ({
     date: d.shift_date,
     hsd_sale_liters: d.hsd_liters,
     ms_sale_liters: d.ms_liters,
@@ -897,7 +961,9 @@ function renderChart(period) {
         { label: 'MS (Petrol)', data: msData, backgroundColor: '#f0b42955', borderColor: '#f0b429', borderWidth: 1.5, borderRadius: 6 },
       ]
     },
-    plugins: period !== 'daily' ? [ChartDataLabels] : [],
+    // Always register the plugin once; visibility is controlled via options
+    // below (datalabels.display), avoiding config-dependent plugin arrays.
+    plugins: [ChartDataLabels],
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
@@ -916,22 +982,30 @@ function renderChart(period) {
 }
 
 async function loadAll() {
+  loadErrors.length = 0;
   await Promise.all([
-    loadSales(),
-    loadCashCredits(),
-    loadFuelRate(),
-    loadTanks(),
-    loadTankChart(),
-    loadTanker(),
-    loadSettlements(),
-    loadNozzles(),
-    loadCredits(),
-    loadSalesData(),
-    loadIrasFreshness(),
-    loadTestingFuel(),
-    loadIssActivity(),
-    loadAudit(),
+    safe('sales', loadSales),
+    safe('cash/credits', loadCashCredits),
+    safe('fuel rate', loadFuelRate),
+    safe('tanks', loadTanks),
+    safe('tank chart', loadTankChart),
+    safe('tanker', loadTanker),
+    safe('settlements', loadSettlements),
+    safe('nozzles', loadNozzles),
+    safe('credits', loadCredits),
+    safe('sales data', loadSalesData),
+    safe('IRAS freshness', loadIrasFreshness),
+    safe('testing fuel', loadTestingFuel),
+    safe('ISS activity', loadIssActivity),
+    safe('audit', loadAudit),
   ]);
+  const errEl = document.getElementById('loadErrors');
+  if (loadErrors.length) {
+    errEl.style.display = 'flex';
+    errEl.textContent = '\u26A0\uFE0F Failed to load: ' + loadErrors.join(', ') + ' \u2014 click Refresh to retry';
+  } else {
+    errEl.style.display = 'none';
+  }
 }
 
 loadAll();

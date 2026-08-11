@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Finance &mdash; Bansiwala Filling Station</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0a0b10; --card: #13151e; --card-border: #1e2133; --card-hover: #181b28;
+  --text: #eaeaf0; --muted: #6b7194; --accent: #6366f1;
+  --green: #34d399; --red: #f87171; --orange: #fb923c; --yellow: #fbbf24;
+  --petrol: #f0b429; --diesel: #4ade80;
+  --glow-petrol: rgba(240,180,41,0.15); --glow-diesel: rgba(74,222,128,0.15); --glow-green: rgba(52,211,153,0.15);
+}
+body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 20px; max-width: 1200px; margin: 0 auto; }
+h1 { font-size: 1.5rem; font-weight: 800; background: linear-gradient(135deg, #f0b429, #a78bfa, #4ade80); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.subtitle { color: var(--muted); font-size: 0.8rem; margin-bottom: 24px; letter-spacing: 0.02em; }
+.grid { display: grid; gap: 14px; margin-bottom: 14px; }
+.grid-2 { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+.grid-3 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.card { background: var(--card); border: 1px solid var(--card-border); border-radius: 14px; padding: 20px; transition: border-color 0.2s, box-shadow 0.2s; }
+.card:hover { border-color: #2d3154; box-shadow: 0 4px 24px rgba(0,0,0,0.3); }
+.card-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 8px; font-weight: 600; }
+.card-value { font-size: 1.7rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.card-sub { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+.card-icon { font-size: 1.4rem; margin-bottom: 8px; }
+.section-title { font-size: 1rem; font-weight: 700; margin: 28px 0 14px; display: flex; align-items: center; gap: 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.8rem; }
+.section-title::after { content: ''; flex: 1; height: 1px; background: var(--card-border); }
+.badge { display: inline-block; padding: 3px 10px; border-radius: 9999px; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.03em; }
+.badge-green { background: #34d39918; color: var(--green); }
+.badge-red { background: #f8717118; color: var(--red); }
+.badge-orange { background: #fb923c18; color: var(--orange); }
+.badge-golden { background: #f0b42918; color: var(--petrol); }
+.badge-diesel { background: #4ade8018; color: var(--diesel); }
+.badge-blue { background: #60a5fa18; color: #60a5fa; }
+.badge-purple { background: #a78bfa18; color: #a78bfa; }
+table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+th { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--card-border); color: var(--muted); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+td { padding: 11px 14px; border-bottom: 1px solid #1a1d2e; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #181b2844; }
+.text-green { color: var(--green); }
+.text-red { color: var(--red); }
+.text-orange { color: var(--orange); }
+.text-blue { color: var(--petrol); }
+.text-purple { color: #a78bfa; }
+.text-muted { color: var(--muted); }
+.tab-row { display: flex; gap: 6px; margin-bottom: 14px; }
+.tab { padding: 7px 18px; border-radius: 10px; border: 1px solid var(--card-border); background: transparent; color: var(--muted); cursor: pointer; font-size: 0.78rem; font-weight: 600; transition: all 0.2s; font-family: inherit; }
+.tab:hover { border-color: var(--accent); color: var(--text); }
+.tab.active { background: var(--accent); color: white; border-color: var(--accent); box-shadow: 0 0 20px rgba(99,102,241,0.3); }
+.loading { color: var(--muted); font-size: 0.82rem; padding: 20px; text-align: center; }
+.header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+.nav-row { display: flex; align-items: center; gap: 8px; }
+.nav-btn { background: var(--card); border: 1px solid var(--card-border); color: var(--muted); padding: 8px 16px; border-radius: 10px; cursor: pointer; font-size: 0.78rem; font-weight: 600; transition: all 0.2s; font-family: inherit; }
+.nav-btn:hover { border-color: var(--accent); color: var(--text); }
+.nav-btn.primary { background: var(--accent); color: white; border-color: var(--accent); }
+.period-label { font-size: 1.05rem; font-weight: 800; min-width: 130px; text-align: center; font-variant-numeric: tabular-nums; }
+.stat-pair { display: flex; align-items: baseline; gap: 8px; }
+.stat-unit { font-size: 0.85rem; font-weight: 500; color: var(--muted); }
+.ledger-row { display: flex; justify-content: space-between; padding: 9px 2px; border-bottom: 1px solid #1a1d2e; font-size: 0.85rem; }
+.ledger-row:last-child { border-bottom: none; }
+.ledger-row.total { font-weight: 800; font-size: 0.95rem; border-top: 1px solid var(--card-border); border-bottom: none; padding-top: 12px; }
+.ledger-row .label { color: var(--muted); }
+.ledger-row .amt { font-variant-numeric: tabular-nums; font-weight: 600; }
+.line-item { display: flex; justify-content: space-between; padding: 7px 2px; border-bottom: 1px dashed #1a1d2e; font-size: 0.8rem; }
+.line-item:last-child { border-bottom: none; }
+.line-item .desc { color: var(--text); }
+.line-item .amt { font-variant-numeric: tabular-nums; }
+.warn { color: var(--orange); font-size: 0.78rem; margin-top: 8px; }
+.error-bar { background: linear-gradient(90deg, #f8717112, #f8717122); border: 1px solid #f8717133; border-radius: 10px; padding: 12px 18px; margin-bottom: 16px; font-size: 0.82rem; color: var(--red); display: none; font-weight: 500; }
+.glow-card { position: relative; overflow: hidden; }
+.glow-card::before { content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, var(--glow-color, transparent) 0%, transparent 70%); opacity: 0.07; pointer-events: none; }
+.pnl-net.positive { color: var(--green); }
+.pnl-net.negative { color: var(--red); }
+.cashflow-closing { border-top: 2px solid var(--accent); padding-top: 10px; }
+@media (max-width: 600px) {
+  body { padding: 12px; }
+  .grid-2 { grid-template-columns: 1fr; }
+  .grid-3 { grid-template-columns: 1fr; }
+  .period-label { font-size: 0.9rem; min-width: 100px; }
+  .header { flex-direction: column; }
+  .card-value { font-size: 1.3rem; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>Finance &mdash; Bansiwala Filling Station</h1>
+    <div class="subtitle">Pump Ledger Analysis &bull; Powered by daily_ledger + credit_ledger + expense_ledger</div>
+  </div>
+  <div style="text-align:right">
+    <button class="nav-btn" onclick="location.href='dashboard.html'" style="margin-left:6px">&larr; Dashboard</button>
+  </div>
+</div>
+
+<div id="errorBar" class="error-bar"></div>
+
+<!-- Period controls -->
+<div class="nav-row" style="justify-content:space-between;margin-bottom:14px;flex-wrap:wrap">
+  <div class="tab-row" style="margin:0">
+    <button class="tab active" id="tabDay" onclick="setPeriod('day')">Daily</button>
+    <button class="tab" id="tabWeek" onclick="setPeriod('week')">Weekly</button>
+    <button class="tab" id="tabMonth" onclick="setPeriod('month')">Monthly</button>
+  </div>
+  <div class="nav-row">
+    <select id="exportScope" style="background:var(--card);border:1px solid var(--card-border);color:var(--muted);padding:8px 12px;border-radius:10px;font-size:0.78rem;font-weight:600;font-family:inherit;outline:none">
+      <option value="period">Export current period</option>
+      <option value="daily">All days (daily ledger)</option>
+      <option value="credits">All credits</option>
+      <option value="expenses">All expenses</option>
+      <option value="full">Full workbook (daily+credits+expenses)</option>
+    </select>
+    <button class="nav-btn primary" onclick="exportCsv()">&#x2B07; Export CSV</button>
+  </div>
+</div>
+<div class="nav-row" style="justify-content:space-between;margin-bottom:14px;flex-wrap:wrap">
+  <div style="display:flex;gap:6px">
+    <button class="nav-btn" onclick="nav(-1)">&larr; Prev</button>
+    <div class="period-label" id="periodLabel">--</div>
+    <button class="nav-btn" onclick="nav(1)">Next &rarr;</button>
+    <button class="nav-btn primary" onclick="goLatest()">Latest</button>
+  </div>
+</div>
+
+<!-- Summary cards -->
+<div class="grid grid-3" id="summaryCards"></div>
+
+<!-- P&L + Cash Flow -->
+<div class="grid grid-2">
+  <div class="card glow-card" style="--glow-color: var(--glow-green)">
+    <div class="card-icon">&#x1F4C8;</div>
+    <div class="card-title">Profit &amp; Loss Statement</div>
+    <div id="pnlBody" class="loading">Loading...</div>
+  </div>
+  <div class="card glow-card" style="--glow-color: var(--glow-petrol)">
+    <div class="card-icon">&#x1F4B0;</div>
+    <div class="card-title">Cash Flow Statement</div>
+    <div id="cfBody" class="loading">Loading...</div>
+  </div>
+</div>
+
+<!-- Line items -->
+<div class="section-title">Line Items</div>
+<div class="grid grid-2">
+  <div class="card">
+    <div class="card-title">Credits (Udhar) <span id="creditSub" class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0"></span></div>
+    <div id="creditBody" class="loading">Loading...</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Expenses (Kharcha) <span id="expenseSub" class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0"></span></div>
+    <div id="expenseBody" class="loading">Loading...</div>
+  </div>
+</div>
+
+<!-- Trend chart -->
+<div class="section-title">Trend <span id="trendRange" class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0"></span></div>
+<div class="card">
+  <div style="position:relative;height:280px;width:100%">
+    <canvas id="trendChart"></canvas>
+  </div>
+</div>
+
+<div style="text-align:center;padding:36px 0 20px;color:#3a3d52;font-size:0.72rem;font-weight:500">
+  Bansiwala Filling Station &bull; Nagla, Karnal &bull; Finance Powered by Supabase
+</div>
+
+<script>
+const SUPABASE_URL = 'https://zkomggcvakdocbgrglkn.supabase.co/rest/v1';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inprb21nZ2N2YWtkb2NiZ3JnbGtuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4NjI5MjIsImV4cCI6MjA5MDQzODkyMn0.Ma3NTFbjiLk4iFN7jgA3jXWT7m3di6gayD3svsnwQpc';
+const HEADERS = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` };
+
+let period = 'day';
+let anchor = null;         // Date object for the current period start
+let latestDate = null;
+let ledger = [];           // daily_ledger rows (asc)
+let credits = [];          // credit_ledger rows
+let expenses = [];         // expense_ledger rows
+let chart = null;
+
+function fmt(n) { return n == null ? '--' : Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 }); }
+function fmtR(n) { return n == null ? '--' : '\u20B9' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 }); }
+function fmtDate(d) { if (!d) return '--'; const dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }); }
+function iso(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function parseISO(s) { return new Date(s + 'T00:00:00'); }
+
+async function query(table, params = '') {
+  const res = await fetch(`${SUPABASE_URL}/${table}?${params}`, { headers: HEADERS });
+  if (!res.ok) throw new Error(`${table}: HTTP ${res.status}`);
+  return res.json();
+}
+
+async function loadAll() {
+  try {
+    const [l, c, e] = await Promise.all([
+      query('daily_ledger', 'order=date.asc&select=date,hsd_income,ms_income,total_income,yesterday_cash,total_cash,phonepe,hdfc_card,bank_deposit,cash_picked,total_credit,total_expenses'),
+      query('credit_ledger', 'order=date.asc&select=date,party_name,type,amount'),
+      query('expense_ledger', 'order=date.asc&select=date,category,amount'),
+    ]);
+    ledger = l; credits = c; expenses = e;
+    latestDate = ledger.length ? ledger[ledger.length - 1].date : null;
+    anchor = parseISO(latestDate);
+    document.getElementById('errorBar').style.display = 'none';
+    render();
+  } catch (err) {
+    console.error(err);
+    const el = document.getElementById('errorBar');
+    el.style.display = 'block';
+    el.textContent = '\u26A0\uFE0F Failed to load finance data: ' + err.message;
+  }
+}
+
+// ---------- period navigation ----------
+function setPeriod(p) {
+  period = p;
+  document.querySelectorAll('#tabDay, #tabWeek, #tabMonth').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab' + p[0].toUpperCase() + p.slice(1)).classList.add('active');
+  if (anchor) render();
+}
+
+function nav(dir) {
+  if (!anchor) return;
+  if (period === 'day') anchor.setDate(anchor.getDate() + dir);
+  else if (period === 'week') anchor.setDate(anchor.getDate() + 7 * dir);
+  else anchor.setMonth(anchor.getMonth() + dir);
+  render();
+}
+
+function goLatest() { anchor = parseISO(latestDate); render(); }
+
+// ---------- helpers ----------
+const ledgerByDate = () => { const m = {}; ledger.forEach(r => m[r.date] = r); return m; };
+
+function periodRange() {
+  if (period === 'day') return { start: iso(anchor), end: iso(anchor) };
+  if (period === 'week') {
+    const d = new Date(anchor); const dow = (d.getDay() + 6) % 7; // Monday start
+    d.setDate(d.getDate() - dow);
+    const end = new Date(d); end.setDate(end.getDate() + 6);
+    return { start: iso(d), end: iso(end) };
+  }
+  const start = anchor.getFullYear() + '-' + String(anchor.getMonth()+1).padStart(2,'0') + '-01';
+  const end = anchor.getFullYear() + '-' + String(anchor.getMonth()+1).padStart(2,'0') + '-' + String(new Date(anchor.getFullYear(), anchor.getMonth()+1, 0).getDate()).padStart(2,'0');
+  return { start, end };
+}
+
+function daysInRange(start, end) {
+  const out = [];
+  const d = parseISO(start);
+  const last = parseISO(end);
+  while (d <= last) { out.push(iso(d)); d.setDate(d.getDate() + 1); }
+  return out;
+}
+
+function periodLabel() {
+  const { start, end } = periodRange();
+  if (period === 'day') return fmtDate(start);
+  if (period === 'month') { const d = parseISO(start); return d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }); }
+  return fmtDate(start) + ' \u2013 ' + fmtDate(end);
+}
+
+// ---------- rendering ----------
+function render() {
+  if (!latestDate) return;
+  document.getElementById('periodLabel').textContent = periodLabel();
+  const { start, end } = periodRange();
+  const dates = daysInRange(start, end);
+  const present = dates.filter(d => ledgerByDate()[d]);
+
+  renderSummary(present);
+  renderPnl(present);
+  renderCashFlow(present);
+  renderLineItems(present, start, end);
+  renderTrend(present, start, end);
+}
+
+function agg(present) {
+  const L = ledgerByDate();
+  let hsd = 0, ms = 0, other = 0, income = 0, exp = 0, credit = 0, pp = 0, hdfc = 0, bank = 0, picked = 0;
+  present.forEach(d => { const r = L[d]; if (!r) return; hsd += r.hsd_income || 0; ms += r.ms_income || 0; income += r.total_income || 0; exp += r.total_expenses || 0; credit += r.total_credit || 0; pp += r.phonepe || 0; hdfc += r.hdfc_card || 0; bank += r.bank_deposit || 0; picked += r.cash_picked || 0; });
+  other = income - hsd - ms;
+  const opening = present.length ? (L[present[0]].yesterday_cash || 0) : 0;
+  const closing = present.length ? (L[present[present.length-1]].total_cash || 0) : 0;
+  return { hsd, ms, other, income, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length };
+}
+
+function renderSummary(present) {
+  const a = agg(present);
+  const net = a.income - a.exp;
+  const el = document.getElementById('summaryCards');
+  el.innerHTML = `
+    <div class="card glow-card" style="--glow-color: var(--glow-diesel)">
+      <div class="card-icon">&#x1F4B2;</div>
+      <div class="card-title">Total Income</div>
+      <div class="stat-pair"><div class="card-value text-green">${fmtR(a.income)}</div></div>
+      <div class="card-sub">HSD ${fmtR(a.hsd)} &bull; MS ${fmtR(a.ms)}${a.other ? ' &bull; Other ' + fmtR(a.other) : ''}</div>
+    </div>
+    <div class="card glow-card" style="--glow-color: var(--glow-petrol)">
+      <div class="card-icon">&#x1F4C9;</div>
+      <div class="card-title">Expenses</div>
+      <div class="stat-pair"><div class="card-value text-red">${fmtR(a.exp)}</div></div>
+      <div class="card-sub">${a.days} day(s) in period</div>
+    </div>
+    <div class="card glow-card" style="--glow-color: var(--glow-green)">
+      <div class="card-icon">&#x1F4C8;</div>
+      <div class="card-title">Net (P&amp;L)</div>
+      <div class="stat-pair"><div class="card-value ${net >= 0 ? 'text-green' : 'text-red'}">${fmtR(net)}</div></div>
+      <div class="card-sub">Income &minus; Expenses (before settlements &amp; udhar)</div>
+    </div>`;
+}
+
+function renderPnl(present) {
+  const a = agg(present);
+  const net = a.income - a.exp;
+  const el = document.getElementById('pnlBody');
+  let html = `
+    <div class="ledger-row"><span class="label">HSD Sales</span><span class="amt text-green">${fmtR(a.hsd)}</span></div>
+    <div class="ledger-row"><span class="label">MS Sales</span><span class="amt text-green">${fmtR(a.ms)}</span></div>`;
+  if (a.other !== 0) html += `<div class="ledger-row"><span class="label">Other Income (lube/credit payments)</span><span class="amt text-green">${fmtR(a.other)}</span></div>`;
+  html += `
+    <div class="ledger-row total"><span class="label">Total Income</span><span class="amt text-green">${fmtR(a.income)}</span></div>
+    <div class="ledger-row"><span class="label">Total Expenses (Kharcha)</span><span class="amt text-red">&minus;${fmtR(a.exp)}</span></div>
+    <div class="ledger-row total pnl-net ${net >= 0 ? 'positive' : 'negative'}"><span class="label">Net Profit (P&amp;L)</span><span class="amt">${fmtR(net)}</span></div>`;
+  el.innerHTML = html;
+}
+
+function renderCashFlow(present) {
+  const a = agg(present);
+  const el = document.getElementById('cfBody');
+  const expected = a.opening + a.income - a.pp - a.hdfc - a.bank - a.picked - a.credit - a.exp;
+  const diff = Math.round((expected - a.closing) * 100) / 100;
+  let html = `
+    <div class="ledger-row"><span class="label">Opening Cash</span><span class="amt">${fmtR(a.opening)}</span></div>
+    <div class="ledger-row"><span class="label">+ Income (sales &amp; other)</span><span class="amt text-green">+${fmtR(a.income)}</span></div>
+    <div class="ledger-row"><span class="label">&minus; PhonePe Settlement</span><span class="amt text-red">&minus;${fmtR(a.pp)}</span></div>
+    <div class="ledger-row"><span class="label">&minus; HDFC / Card Settlement</span><span class="amt text-red">&minus;${fmtR(a.hdfc)}</span></div>
+    <div class="ledger-row"><span class="label">&minus; Bank Deposit</span><span class="amt text-red">&minus;${fmtR(a.bank)}</span></div>
+    <div class="ledger-row"><span class="label">&minus; Cash Picked</span><span class="amt text-red">&minus;${fmtR(a.picked)}</span></div>
+    <div class="ledger-row"><span class="label">&minus; Credits Given (Udhar)</span><span class="amt text-red">&minus;${fmtR(a.credit)}</span></div>
+    <div class="ledger-row"><span class="label">&minus; Expenses (Kharcha)</span><span class="amt text-red">&minus;${fmtR(a.exp)}</span></div>
+    <div class="ledger-row total cashflow-closing"><span class="label">Closing Cash</span><span class="amt">${fmtR(a.closing)}</span></div>`;
+  if (Math.abs(diff) > 2) {
+    html += `<div class="warn">\u26A0\uFE0F Recon gap: closing should be ${fmtR(expected)} (${fmtR(diff)} difference &mdash; missing days or data errors)</div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderLineItems(present, start, end) {
+  // Credits for the period
+  const L = ledgerByDate();
+  const cIn = {}, cOut = {};
+  credits.forEach(r => {
+    if (r.date < start || r.date > end) return;
+    const amt = Number(r.amount) || 0;
+    const key = r.party_name || '?';
+    if (r.type === 'credit') { cIn[key] = (cIn[key] || 0) + amt; }
+    else { cOut[key] = (cOut[key] || 0) + amt; } // payment / debit = money received
+  });
+  const cKeys = Object.keys(cIn).concat(Object.keys(cOut)).filter((v, i, arr) => arr.indexOf(v) === i);
+  let cTotal = 0;
+  let chtml = cKeys.length ? '' : '<div class="text-muted" style="font-size:0.82rem;padding:8px 2px">No credit entries in this period</div>';
+  cKeys.sort((a, b) => ((cIn[b] || 0) - (cOut[b] || 0)) - ((cIn[a] || 0) - (cOut[a] || 0)));
+  cKeys.forEach(k => {
+    const given = cIn[k] || 0, recv = cOut[k] || 0;
+    cTotal += given;
+    chtml += `<div class="line-item"><span class="desc">${k}</span><span class="amt">${recv ? '<span class="text-green">+'+fmtR(recv)+'</span> ' : ''}${given ? '<span class="text-red">'+fmtR(given)+'</span>' : ''}</span></div>`;
+  });
+  document.getElementById('creditSub').textContent = present.length ? (period === 'day' ? fmtDate(start) : fmtDate(start) + ' \u2013 ' + fmtDate(end)) : '';
+  document.getElementById('creditBody').innerHTML = chtml;
+
+  // Expenses grouped by category for the period
+  const eAgg = {};
+  expenses.forEach(r => {
+    if (r.date < start || r.date > end) return;
+    const key = r.category || '?';
+    eAgg[key] = (eAgg[key] || 0) + (Number(r.amount) || 0);
+  });
+  const eKeys = Object.keys(eAgg).sort((a, b) => eAgg[b] - eAgg[a]);
+  let etotal = 0;
+  let ehtml = eKeys.length ? '' : '<div class="text-muted" style="font-size:0.82rem;padding:8px 2px">No expenses in this period</div>';
+  eKeys.forEach(k => { etotal += eAgg[k]; ehtml += `<div class="line-item"><span class="desc">${k}</span><span class="amt">${fmtR(eAgg[k])}</span></div>`; });
+  document.getElementById('expenseSub').textContent = present.length ? (period === 'day' ? fmtDate(start) : fmtDate(start) + ' \u2013 ' + fmtDate(end)) : '';
+  document.getElementById('expenseBody').innerHTML = ehtml;
+
+  // Day view also shows full itemized lists instead of grouped totals
+  if (period === 'day' && present.length) {
+    renderDayItems(start);
+  }
+}
+
+function renderDayItems(date) {
+  // Override grouped view with per-line-item lists for the single day
+  const cRows = credits.filter(r => r.date === date);
+  let chtml = cRows.length ? '' : '<div class="text-muted" style="font-size:0.82rem;padding:8px 2px">No credit entries</div>';
+  cRows.forEach(r => {
+    const recv = r.type !== 'credit';
+    chtml += `<div class="line-item"><span class="desc">${r.party_name}${recv ? ' <span class="badge badge-green" style="font-size:0.55rem">PAYMENT</span>' : ''}</span><span class="amt ${recv ? 'text-green' : 'text-red'}">${recv ? '+' : ''}${fmtR(r.amount)}</span></div>`;
+  });
+  document.getElementById('creditBody').innerHTML = chtml;
+
+  const eRows = expenses.filter(r => r.date === date);
+  let ehtml = eRows.length ? '' : '<div class="text-muted" style="font-size:0.82rem;padding:8px 2px">No expenses</div>';
+  let etotal = 0;
+  eRows.forEach(r => { etotal += Number(r.amount) || 0; ehtml += `<div class="line-item"><span class="desc">${r.category}</span><span class="amt">${fmtR(r.amount)}</span></div>`; });
+  if (eRows.length) ehtml += `<div class="line-item" style="font-weight:700;border-top:1px solid var(--card-border);padding-top:8px"><span class="desc">Total</span><span class="amt">${fmtR(etotal)}</span></div>`;
+  document.getElementById('expenseBody').innerHTML = ehtml;
+}
+
+function renderTrend(present, start, end) {
+  const L = ledgerByDate();
+  // For day view, show last 14 days ending at anchor; for week/month show each day in period
+  let days;
+  if (period === 'day') {
+    days = [];
+    for (let i = 13; i >= 0; i--) { const d = new Date(anchor); d.setDate(d.getDate() - i); days.push(iso(d)); }
+  } else {
+    days = daysInRange(start, end);
+  }
+  const labels = days.map(d => { const dt = parseISO(d); return period === 'month' ? dt.toLocaleDateString('en-IN', { day: 'numeric' }) : dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }); });
+  const inc = days.map(d => (L[d] ? (L[d].total_income || 0) : null));
+  const exp = days.map(d => (L[d] ? (L[d].total_expenses || 0) : null));
+
+  document.getElementById('trendRange').textContent = period === 'day' ? '\u2014 last 14 days' : (fmtDate(days[0]) + ' \u2192 ' + fmtDate(days[days.length-1]));
+
+  if (chart) chart.destroy();
+  chart = new Chart(document.getElementById('trendChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Income', data: inc, backgroundColor: '#4ade8055', borderColor: '#4ade80', borderWidth: 1.5, borderRadius: 6, spanGaps: true },
+        { label: 'Expenses', data: exp, backgroundColor: '#f8717155', borderColor: '#f87171', borderWidth: 1.5, borderRadius: 6, spanGaps: true },
+      ]
+    },
+    plugins: [ChartDataLabels],
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#6b7194', font: { size: 12, family: 'Inter' }, usePointStyle: true, pointStyle: 'rectRounded' } },
+        datalabels: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => ctx.dataset.label + ': ' + (ctx.parsed.y == null ? '\u2014' : '\u20B9' + Math.round(ctx.parsed.y).toLocaleString('en-IN'))
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#6b7194', font: { size: 9, family: 'Inter' }, maxRotation: 45 }, grid: { color: '#1e2133' } },
+        y: { ticks: { color: '#6b7194', font: { family: 'Inter' }, callback: v => '\u20B9' + v.toLocaleString('en-IN') }, grid: { color: '#1e2133' } }
+      }
+    }
+  });
+}
+
+// ---------- CSV export ----------
+function csvEscape(v) {
+  if (v == null) return '';
+  const s = String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function downloadCsv(filename, rows) {
+  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function periodDates() {
+  const { start, end } = periodRange();
+  return { start, end };
+}
+
+function exportCsv() {
+  const scope = document.getElementById('exportScope').value;
+  const tag = iso(new Date()).replace(/-/g, '');
+  if (scope === 'period') exportPeriod(tag);
+  else if (scope === 'daily') exportDaily(tag);
+  else if (scope === 'credits') exportCredits(tag);
+  else if (scope === 'expenses') exportExpenses(tag);
+  else exportFull(tag);
+}
+
+function exportPeriod(tag) {
+  const { start, end } = periodDates();
+  const dates = daysInRange(start, end);
+  const L = ledgerByDate();
+  const present = dates.filter(d => L[d]);
+  const a = agg(present);
+  const net = a.income - a.exp;
+  const label = period === 'day' ? start : start + '_to_' + end;
+  const files = [];
+
+  // 1. Summary / P&L + Cash flow
+  files.push({
+    name: `pnl_cashflow_${label}.csv`,
+    rows: [
+      ['Bansiwala Filling Station - Finance Export'],
+      ['Period', start, 'to', end, period + ' view'],
+      [''],
+      ['PROFIT & LOSS'],
+      ['HSD Sales', a.hsd],
+      ['MS Sales', a.ms],
+      ['Other Income', a.other],
+      ['Total Income', a.income],
+      ['Total Expenses (Kharcha)', a.exp],
+      ['Net Profit (P&L)', net],
+      [''],
+      ['CASH FLOW'],
+      ['Opening Cash', a.opening],
+      ['+ Income', a.income],
+      ['- PhonePe Settlement', a.pp],
+      ['- HDFC / Card Settlement', a.hdfc],
+      ['- Bank Deposit', a.bank],
+      ['- Cash Picked', a.picked],
+      ['- Credits Given (Udhar)', a.credit],
+      ['- Expenses (Kharcha)', a.exp],
+      ['Closing Cash', a.closing],
+      ['Recon Gap', Math.round((a.opening + a.income - a.pp - a.hdfc - a.bank - a.picked - a.credit - a.exp - a.closing) * 100) / 100],
+    ]
+  });
+
+  // 2. Daily detail within period
+  const dRows = [['Date', 'HSD Income', 'MS Income', 'Other Income', 'Total Income', 'Expenses', 'Credits Given', 'PhonePe', 'HDFC', 'Bank Deposit', 'Cash Picked', 'Opening Cash', 'Closing Cash']];
+  present.forEach(d => {
+    const r = L[d];
+    dRows.push([d, r.hsd_income || 0, r.ms_income || 0, (r.total_income || 0) - (r.hsd_income || 0) - (r.ms_income || 0), r.total_income || 0, r.total_expenses || 0, r.total_credit || 0, r.phonepe || 0, r.hdfc_card || 0, r.bank_deposit || 0, r.cash_picked || 0, r.yesterday_cash || 0, r.total_cash || 0]);
+  });
+  files.push({ name: `daily_detail_${label}.csv`, rows: dRows });
+
+  // 3. Line items
+  const cRows = [['Date', 'Party', 'Type', 'Amount']];
+  credits.filter(c => c.date >= start && c.date <= end).forEach(c => cRows.push([c.date, c.party_name, c.type, c.amount]));
+  files.push({ name: `credits_${label}.csv`, rows: cRows });
+
+  const eRows = [['Date', 'Category', 'Amount']];
+  expenses.filter(e => e.date >= start && e.date <= end).forEach(e => eRows.push([e.date, e.category, e.amount]));
+  files.push({ name: `expenses_${label}.csv`, rows: eRows });
+
+  if (files.length === 1) downloadCsv(files[0].name, files[0].rows);
+  else files.forEach(f => downloadCsv(f.name, f.rows));
+}
+
+function exportDaily(tag) {
+  const L = ledgerByDate();
+  const rows = [['Date', 'HSD Income', 'MS Income', 'Other Income', 'Total Income', 'Expenses', 'Credits Given', 'PhonePe', 'HDFC', 'Bank Deposit', 'Cash Picked', 'Opening Cash', 'Closing Cash', 'Net (P&L)']];
+  ledger.forEach(r => rows.push([
+    r.date, r.hsd_income || 0, r.ms_income || 0,
+    (r.total_income || 0) - (r.hsd_income || 0) - (r.ms_income || 0),
+    r.total_income || 0, r.total_expenses || 0, r.total_credit || 0,
+    r.phonepe || 0, r.hdfc_card || 0, r.bank_deposit || 0, r.cash_picked || 0,
+    r.yesterday_cash || 0, r.total_cash || 0,
+    (r.total_income || 0) - (r.total_expenses || 0)
+  ]));
+  downloadCsv(`all_days_${tag}.csv`, rows);
+}
+
+function exportCredits(tag) {
+  const rows = [['Date', 'Party', 'Type', 'Amount']];
+  credits.forEach(c => rows.push([c.date, c.party_name, c.type, c.amount]));
+  downloadCsv(`all_credits_${tag}.csv`, rows);
+}
+
+function exportExpenses(tag) {
+  const rows = [['Date', 'Category', 'Amount']];
+  expenses.forEach(e => rows.push([e.date, e.category, e.amount]));
+  downloadCsv(`all_expenses_${tag}.csv`, rows);
+}
+
+function exportFull(tag) {
+  exportDaily(tag);
+  exportCredits(tag);
+  exportExpenses(tag);
+}
+
+loadAll();
+</script>
+</body>
+</html>
