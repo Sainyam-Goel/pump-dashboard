@@ -507,7 +507,8 @@ function agg(present) {
 
 function renderSummary(present) {
   const a = agg(present);
-  const net = a.income - a.exp;
+  const gross = a.income - a.cogs;
+  const net = gross - a.exp;
   const el = document.getElementById('summaryCards');
   el.innerHTML = `
     <div class="card glow-card" style="--glow-color: var(--glow-diesel)">
@@ -524,9 +525,9 @@ function renderSummary(present) {
     </div>
     <div class="card glow-card" style="--glow-color: var(--glow-green)">
       <div class="card-icon">&#x1F4C8;</div>
-      <div class="card-title">Net (P&amp;L)</div>
+      <div class="card-title">Net Profit (P&amp;L)</div>
       <div class="stat-pair"><div class="card-value ${net >= 0 ? 'text-green' : 'text-red'}">${fmtR(net)}</div></div>
-      <div class="card-sub">Income &minus; Expenses (before settlements &amp; udhar)</div>
+      <div class="card-sub">Income &minus; COGS &minus; Expenses</div>
     </div>`;
 }
 
@@ -546,7 +547,7 @@ function renderPnl(present) {
     <div class="ledger-row"><span class="label">Total Expenses (Kharcha)</span><span class="amt text-red">&minus;${fmtR(a.exp)}</span></div>
     <div class="ledger-row total pnl-net ${net >= 0 ? 'positive' : 'negative'}"><span class="label">Net Profit (P&amp;L)</span><span class="amt">${fmtR(net)}</span></div>`;
   if (a.nonFuelCashIn > 500) {
-    html += `<div class="warn">\u2139\uFE0F Hisaab cash-in exceeds IRAS fuel + lube revenue by ${fmtR(a.nonFuelCashIn)} — of which ${fmtR(a.creditRepaid)} is logged udhar repayment. The remainder is either small cash repayments (no party detail in hisaab) or OCR overstatement of fuel income (HSD/MS swap) — cheque repayments are NOT here (they go direct to bank, visible in bank statements).</div>`;
+    html += `<div class="warn">\u2139\uFE0F Cash-in exceeds fuel revenue by ${fmtR(a.nonFuelCashIn)} — udhar repayments (${fmtR(a.creditRepaid)} logged) or OCR overstatement. Cheque repayments go direct to bank.</div>`;
   }
   el.innerHTML = html;
 }
