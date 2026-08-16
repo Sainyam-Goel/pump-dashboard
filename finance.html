@@ -858,17 +858,21 @@ function renderTrend(present, start, end) {
 function csvEscape(v) {
   if (v == null) return '';
   const s = String(v);
-  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
+// Round to 2dp — raw floats (393605.6699999999) look broken in Excel.
+const money = n => Math.round((Number(n) || 0) * 100) / 100;
+
 function downloadCsv(filename, rows) {
-  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
+  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\r\n');
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(a.href);
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 2000);
 }
 
 function periodDates() {
@@ -876,111 +880,142 @@ function periodDates() {
   return { start, end };
 }
 
+// P&L section — 2 fixed columns. Labels never start with +/-/= so Excel
+// doesn't try to parse them as formulas.
+function pnlRows(a) {
+  const gross = a.income - a.cogs;
+  const net = gross - a.exp;
+  return [
+    ['PROFIT & LOSS'],
+    ['HSD Sales', money(a.hsd)],
+    ['MS Sales', money(a.ms)],
+    ['Other Income (lube sales)', money(a.other)],
+    ['Total Income (IRAS revenue + lube)', money(a.income)],
+    ['COGS', money(a.cogs)],
+    ['  COGS HSD liters', money(a.hsdL)],
+    ['  COGS MS liters', money(a.msL)],
+    ['Gross Margin', money(gross)],
+    ['Total Expenses (Kharcha)', money(a.exp)],
+    ['Net Profit (P&L)', money(net)],
+  ];
+}
+
+function cashFlowRows(a) {
+  const recon = money(a.opening + a.ledgerInc - a.pp - a.hdfc - a.bank - a.picked - a.credit - a.exp - a.closing);
+  return [
+    ['CASH FLOW'],
+    ['Opening Cash', money(a.opening)],
+    ['Add: Income (ledger, excl. repayments)', money(a.ledgerInc - a.creditRepaid)],
+    ['Add: Udhar Received Back', money(a.creditRepaid)],
+    ['Less: PhonePe Settlement', money(a.pp)],
+    ['Less: HDFC / Card Settlement', money(a.hdfc)],
+    ['Less: Bank Deposit', money(a.bank)],
+    ['Less: Cash Picked', money(a.picked)],
+    ['Less: Credits Given (Udhar)', money(a.credit)],
+    ['Less: Expenses (Kharcha)', money(a.exp)],
+    ['Closing Cash', money(a.closing)],
+    ['Recon Gap', recon],
+  ];
+}
+
+// Daily detail — ledger columns (cash-flow) + IRAS P&L columns.
+function dailyRows(dates, L) {
+  const rows = [[
+    'Date', 'HSD Income (ledger)', 'MS Income (ledger)', 'Other Ledger Income', 'Total Ledger Income',
+    'COGS', 'Expenses', 'Credits Given', 'PhonePe', 'HDFC', 'Bank Deposit', 'Cash Picked',
+    'Opening Cash', 'Closing Cash', 'IRAS Revenue (HSD+MS)', 'Lube Sales', 'Net (P&L)',
+  ]];
+  dates.forEach(d => {
+    const r = L[d];
+    if (!r) return;
+    const cg = cogsForDay(d);
+    const st = shiftTotals.find(x => x.shift_date === d);
+    const hasSt = st && (st.hsd_income != null || st.ms_income != null);
+    const hsdRev = hasSt ? Number(st.hsd_income || 0) : 0;
+    const msRev = hasSt ? Number(st.ms_income || 0) : 0;
+    let lube = 0;
+    lubeSales.forEach(x => { if (x.date === d) lube += Number(x.amount) || 0; });
+    const hasCogs = cg && (cg.hsd_l + cg.ms_l) > 0;
+    const cogs = hasCogs ? cg.total : 0;
+    const exp = r.total_expenses || 0;
+    const net = hasSt && hasCogs ? hsdRev + msRev + lube - cogs - exp : null;
+    rows.push([
+      d,
+      money(r.hsd_income), money(r.ms_income),
+      money((r.total_income || 0) - (r.hsd_income || 0) - (r.ms_income || 0)),
+      money(r.total_income),
+      hasCogs ? money(cogs) : '', money(exp), money(r.total_credit),
+      money(r.phonepe), money(r.hdfc_card), money(r.bank_deposit), money(r.cash_picked),
+      money(r.yesterday_cash), money(r.total_cash),
+      hasSt ? money(hsdRev + msRev) : '', money(lube), net == null ? '' : money(net),
+    ]);
+  });
+  return rows;
+}
+
+function creditsRows(from, to) {
+  const rows = [['Date', 'Party', 'Type', 'Amount']];
+  credits
+    .filter(c => (!from || c.date >= from) && (!to || c.date <= to))
+    .forEach(c => rows.push([c.date, c.party_name, c.type, money(c.amount)]));
+  return rows;
+}
+
+function expensesRows(from, to) {
+  const rows = [['Date', 'Category', 'Bin', 'Amount']];
+  expenses
+    .filter(e => (!from || e.date >= from) && (!to || e.date <= to))
+    .forEach(e => rows.push([e.date, e.category, categorize(e.category), money(e.amount)]));
+  return rows;
+}
+
+// One file per scope (multi-file bursts get blocked by browsers → files missing).
 function exportCsv() {
   const scope = document.getElementById('exportScope').value;
   const tag = iso(new Date()).replace(/-/g, '');
-  if (scope === 'period') exportPeriod(tag);
-  else if (scope === 'daily') exportDaily(tag);
-  else if (scope === 'credits') exportCredits(tag);
-  else if (scope === 'expenses') exportExpenses(tag);
-  else exportFull(tag);
-}
+  const L = ledgerByDate();
+  const allDates = [...new Set(ledger.map(r => r.date))].sort();
 
-function exportPeriod(tag) {
+  if (scope === 'credits') { downloadCsv(`credits_all_${tag}.csv`, creditsRows(null, null)); return; }
+  if (scope === 'expenses') { downloadCsv(`expenses_all_${tag}.csv`, expensesRows(null, null)); return; }
+  if (scope === 'daily') { downloadCsv(`daily_ledger_all_${tag}.csv`, dailyRows(allDates, L)); return; }
+
   const { start, end } = periodDates();
-  const dates = daysInRange(start, end);
-  const L = ledgerByDate();
-  const present = dates.filter(d => L[d]);
-  const a = agg(present);
-  const gross = a.income - a.cogs;
-  const net = gross - a.exp;
   const label = period === 'day' ? start : start + '_to_' + end;
-  const files = [];
+  const present = daysInRange(start, end).filter(d => L[d]);
+  const a = agg(present);
 
-  files.push({
-    name: `pnl_cashflow_${label}.csv`,
-    rows: [
+  if (scope === 'period') {
+    const rows = [
       ['Bansiwala Filling Station - Finance Export'],
-      ['Period', start, 'to', end, period + ' view'],
+      ['Period', start + ' to ' + end + ' (' + period + ' view)'],
       [''],
-      ['PROFIT & LOSS'],
-      ['HSD Sales', a.hsd],
-      ['MS Sales', a.ms],
-      ['Other Income (lube sales)', a.other],
-      ['Udhar repayments / other cash-in (not P&L income)', a.nonFuelCashIn],
-      ['Total Income (IRAS revenue)', a.income],
-      ['COGS', a.cogs],
-      ['Gross Margin', gross],
-      ['Total Expenses (Kharcha)', a.exp],
-      ['Net Profit (P&L)', net],
+      ...pnlRows(a),
       [''],
-      ['CASH FLOW'],
-      ['Opening Cash', a.opening],
-      ['+ Income (ledger, excl. repayments)', a.ledgerInc - a.creditRepaid],
-      ['+ Udhar Received Back', a.creditRepaid],
-      ['- PhonePe Settlement', a.pp],
-      ['- HDFC / Card Settlement', a.hdfc],
-      ['- Bank Deposit', a.bank],
-      ['- Cash Picked', a.picked],
-      ['- Credits Given (Udhar)', a.credit],
-      ['- Expenses (Kharcha)', a.exp],
-      ['Closing Cash', a.closing],
-      ['Recon Gap', Math.round((a.opening + a.ledgerInc - a.pp - a.hdfc - a.bank - a.picked - a.credit - a.exp - a.closing) * 100) / 100],
-    ]
-  });
+      ...cashFlowRows(a),
+      [''],
+      ...dailyRows(present, L),
+      [''],
+      ...creditsRows(start, end),
+      [''],
+      ...expensesRows(start, end),
+    ];
+    downloadCsv(`finance_${label}.csv`, rows);
+    return;
+  }
 
-  const dRows = [['Date', 'HSD Income', 'MS Income', 'Other Income', 'Total Income', 'COGS', 'Expenses', 'Credits Given', 'PhonePe', 'HDFC', 'Bank Deposit', 'Cash Picked', 'Opening Cash', 'Closing Cash']];
-  present.forEach(d => {
-    const r = L[d];
-    const cg = cogsForDay(d);
-    dRows.push([d, r.hsd_income || 0, r.ms_income || 0, (r.total_income || 0) - (r.hsd_income || 0) - (r.ms_income || 0), r.total_income || 0, cg ? Math.round(cg.total) : 0, r.total_expenses || 0, r.total_credit || 0, r.phonepe || 0, r.hdfc_card || 0, r.bank_deposit || 0, r.cash_picked || 0, r.yesterday_cash || 0, r.total_cash || 0]);
-  });
-  files.push({ name: `daily_detail_${label}.csv`, rows: dRows });
-
-  const cRows = [['Date', 'Party', 'Type', 'Amount']];
-  credits.filter(c => c.date >= start && c.date <= end).forEach(c => cRows.push([c.date, c.party_name, c.type, c.amount]));
-  files.push({ name: `credits_${label}.csv`, rows: cRows });
-
-  const eRows = [['Date', 'Category', 'Bin', 'Amount']];
-  expenses.filter(e => e.date >= start && e.date <= end).forEach(e => eRows.push([e.date, e.category, categorize(e.category), e.amount]));
-  files.push({ name: `expenses_${label}.csv`, rows: eRows });
-
-  files.forEach(f => downloadCsv(f.name, f.rows));
-}
-
-function exportDaily(tag) {
-  const L = ledgerByDate();
-  const rows = [['Date', 'HSD Income', 'MS Income', 'Other Income', 'Total Income', 'COGS', 'Expenses', 'Credits Given', 'PhonePe', 'HDFC', 'Bank Deposit', 'Cash Picked', 'Opening Cash', 'Closing Cash', 'Net (P&L)']];
-  ledger.forEach(r => {
-    const cg = cogsForDay(r.date);
-    rows.push([
-      r.date, r.hsd_income || 0, r.ms_income || 0,
-      (r.total_income || 0) - (r.hsd_income || 0) - (r.ms_income || 0),
-      r.total_income || 0, cg ? Math.round(cg.total) : 0, r.total_expenses || 0, r.total_credit || 0,
-      r.phonepe || 0, r.hdfc_card || 0, r.bank_deposit || 0, r.cash_picked || 0,
-      r.yesterday_cash || 0, r.total_cash || 0,
-      (r.total_income || 0) - (r.total_expenses || 0)
-    ]);
-  });
-  downloadCsv(`all_days_${tag}.csv`, rows);
-}
-
-function exportCredits(tag) {
-  const rows = [['Date', 'Party', 'Type', 'Amount']];
-  credits.forEach(c => rows.push([c.date, c.party_name, c.type, c.amount]));
-  downloadCsv(`all_credits_${tag}.csv`, rows);
-}
-
-function exportExpenses(tag) {
-  const rows = [['Date', 'Category', 'Bin', 'Amount']];
-  expenses.forEach(e => rows.push([e.date, e.category, categorize(e.category), e.amount]));
-  downloadCsv(`all_expenses_${tag}.csv`, rows);
-}
-
-function exportFull(tag) {
-  exportDaily(tag);
-  exportCredits(tag);
-  exportExpenses(tag);
+  // full — daily + credits + expenses in one workbook-style file
+  const rows = [
+    ['Bansiwala Filling Station - Full Export'],
+    ['Generated', iso(new Date())],
+    [''],
+    ...dailyRows(allDates, L),
+    [''],
+    ...creditsRows(null, null),
+    [''],
+    ...expensesRows(null, null),
+  ];
+  downloadCsv(`full_export_${tag}.csv`, rows);
 }
 
 loadAll();
