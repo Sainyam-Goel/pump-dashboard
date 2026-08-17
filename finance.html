@@ -660,17 +660,18 @@ function renderPad() {
     return;
   }
   // PAD = "balance to pay" IOCL. Positive balance = the pump OWES IOCL.
-  // Latest activity row first (date desc, then id desc).
+  // Headline = latest closing balance + same-day open delivery value.
   const sorted = [...padData].sort((a, b) =>
     b.date === a.date ? (Number(b.id || 0) - Number(a.id || 0)) : (b.date > a.date ? 1 : -1));
-  const last = sorted[0];
-  const bal = Number(last.total_payable != null ? last.total_payable : (last.balance != null ? last.balance : 0));
+  const closing = sorted.find(t => t.balance != null);
+  const last = closing || sorted[0];
+  const odv = sorted.find(t => t.type === 'OPEN_DELIVERY' && t.date === last.date);
+  const odvAmt = Number(odv?.amount || odv?.open_delivery_value || 0);
+  const bal = Number(last.balance != null ? last.balance : 0) + odvAmt;
   const owed = bal > 0;
   let html = `<div class="pad-balance ${owed ? 'text-red' : 'text-green'}">${fmtR(bal)}</div>`;
   html += `<div class="card-sub">As of ${fmtDate(last.date)} &bull; PAD balance to pay IOCL${owed ? ' (owed)' : ' (in advance)'}`;
-  if (Number(last.open_delivery_value || 0) > 0) {
-    html += ` &bull; incl. ${fmtR(last.open_delivery_value)} open deliveries`;
-  }
+  if (odvAmt > 0) html += ` &bull; incl. ${fmtR(odvAmt)} open deliveries`;
   html += `</div>`;
   // Recent activity (skip the headline row)
   if (sorted.length > 1) {
