@@ -659,15 +659,23 @@ function renderPad() {
     el.innerHTML = `<div class="text-muted" style="font-size:0.82rem">No PAD balance data. <br>Set up the <code>pad_balance</code> table and sync via the SDMS bookmarklet (see repo).</div>`;
     return;
   }
-  const last = padData[0];
-  const bal = Number(last.balance != null ? last.balance : (last.closing_balance != null ? last.closing_balance : 0));
-  const cls = bal >= 0 ? 'text-green' : 'text-red';
-  let html = `<div class="pad-balance ${cls}">${fmtR(bal)}</div>`;
-  html += `<div class="card-sub">As of ${fmtDate(last.date)} &bull; PAD (Payment Against Delivery) &mdash; IOCL account</div>`;
-  // Last few transactions
-  if (padData.length > 1) {
+  // PAD = "balance to pay" IOCL. Positive balance = the pump OWES IOCL.
+  // Latest activity row first (date desc, then id desc).
+  const sorted = [...padData].sort((a, b) =>
+    b.date === a.date ? (Number(b.id || 0) - Number(a.id || 0)) : (b.date > a.date ? 1 : -1));
+  const last = sorted[0];
+  const bal = Number(last.total_payable != null ? last.total_payable : (last.balance != null ? last.balance : 0));
+  const owed = bal > 0;
+  let html = `<div class="pad-balance ${owed ? 'text-red' : 'text-green'}">${fmtR(bal)}</div>`;
+  html += `<div class="card-sub">As of ${fmtDate(last.date)} &bull; PAD balance to pay IOCL${owed ? ' (owed)' : ' (in advance)'}`;
+  if (Number(last.open_delivery_value || 0) > 0) {
+    html += ` &bull; incl. ${fmtR(last.open_delivery_value)} open deliveries`;
+  }
+  html += `</div>`;
+  // Recent activity (skip the headline row)
+  if (sorted.length > 1) {
     html += '<div style="margin-top:10px"><div class="card-sub" style="margin-bottom:4px">Recent activity:</div>';
-    padData.slice(1, 6).forEach(t => {
+    sorted.slice(1, 5).forEach(t => {
       const amt = Number(t.amount || 0);
       const isCredit = String(t.type || '').toUpperCase() === 'CREDIT' || (t.description || '').toUpperCase().includes('CREDIT');
       html += `<div class="line-item"><span class="desc">${fmtDate(t.date)} ${t.description || ''}</span><span class="amt ${isCredit ? 'text-green' : 'text-red'}">${isCredit ? '+' : '-'}${fmtR(amt)}</span></div>`;
