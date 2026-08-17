@@ -165,6 +165,22 @@ tr:hover td { background: #181b2844; }
   </div>
 </div>
 
+<!-- Data sources health -->
+<div class="section-title">Data Sources <span class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0">coverage &amp; freshness across every pipeline</span></div>
+<div class="card" style="padding:0;overflow:hidden;border-radius:14px">
+  <div style="overflow-x:auto">
+  <table id="sourcesTable">
+    <thead><tr>
+      <th>Source</th>
+      <th>Rows</th>
+      <th>Coverage</th>
+      <th style="text-align:right">Freshness</th>
+    </tr></thead>
+    <tbody id="sourcesBody"><tr><td colspan="4" class="loading">Loading...</td></tr></tbody>
+  </table>
+  </div>
+</div>
+
 <!-- IOCL paid vs billed -->
 <div class="section-title">IOCL Paid vs Billed <span class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0">bank payments vs invoice debits — monthly bars + cumulative variance</span></div>
 <div class="card">
@@ -270,6 +286,9 @@ let nozzleReceipts = []; // { date, nozzle_id, reading } — for monthly totaliz
 let lubeSales = [];      // { date, product, quantity, amount } — real lube income (P&L)
 let padData = null;
 let bankIocl = [];     // { date, withdrawal } — IOCL payments from the HDFC statement
+let bankAll = [];      // { date } — all bank statement rows (for health card)
+let invoiceDates = []; // { date } — tanker invoices (for health card)
+let registerDates = [];// { date } — physical register offloads (for health card)
 let ioclChart = null;
 let chart = null;
 
@@ -375,6 +394,9 @@ async function loadAll() {
     try { shiftTotals = await rpc('iss_shift_totals', {}); } catch (err) { console.warn('iss_shift_totals:', err); shiftTotals = []; }
     try { padData = await query('pad_balance', 'order=date.asc&limit=2000'); } catch (err) { padData = null; console.warn('pad_balance table not available:', err); }
     try { bankIocl = await query('bank_transactions', 'category=eq.iocl&order=date.asc&select=date,withdrawal&limit=2000'); } catch (err) { bankIocl = []; console.warn('bank_transactions not available:', err); }
+    try { bankAll = await query('bank_transactions', 'order=date.asc&select=date&limit=5000'); } catch (err) { bankAll = []; }
+    try { invoiceDates = await query('fuel_tanker_tracker', 'order=date.asc&select=date&limit=1000'); } catch (err) { invoiceDates = []; }
+    try { registerDates = await query('tanker_unloading', 'order=date.asc&select=date&limit=1000'); } catch (err) { registerDates = []; }
     latestDate = ledger.length ? ledger[ledger.length - 1].date : null;
     anchor = parseISO(latestDate);
     document.getElementById('errorBar').style.display = 'none';
@@ -471,6 +493,7 @@ function render() {
   renderCashFlow(present);
   renderSettlements(start, end);
   renderPad();
+  renderDataSources();
   renderIoclVerify();
   renderMonthlyVerify();
   renderLineItems(present, start, end);
@@ -856,6 +879,43 @@ function renderLineItems(present, start, end) {
   if (bins.length) ehtml += `<div class="ledger-row total"><span class="label">Total Expenses</span><span class="amt">${fmtR(etotal)}</span></div>`;
   document.getElementById('expenseSub').textContent = present.length ? (period === 'day' ? fmtDate(start) : fmtDate(start) + ' \u2013 ' + fmtDate(end)) : '';
   document.getElementById('expenseBody').innerHTML = ehtml;
+}
+
+// Data-source health: coverage + freshness for every pipeline feeding the page.
+function renderDataSources() {
+  const el = document.getElementById('sourcesBody');
+  if (!el) return;
+  const todayISO = iso(new Date());
+  const behind = lastD => lastD ? Math.max(0, Math.round((new Date(todayISO) - new Date(lastD)) / 864e5)) : null;
+  const lastOf = arr => arr.length ? arr[arr.length - 1].date : null;
+  const firstOf = arr => arr.length ? arr[0].date : null;
+
+  const sources = [
+    { name: 'HDFC bank statement', rows: bankAll.length, first: firstOf(bankAll), last: lastOf(bankAll), limit: 14, note: 'manual export' },
+    { name: 'IOCL PAD ledger', rows: padData ? padData.length : 0, first: padData && padData.length ? padData[0].date : null, last: padData && padData.length ? lastOf([...padData].sort((a, b) => a.date < b.date ? -1 : 1)) : null, limit: 3, note: 'bookmarklet / manual' },
+    { name: 'Tanker invoices (SDMS)', rows: invoiceDates.length, first: firstOf(invoiceDates), last: lastOf(invoiceDates), limit: 14, note: 'priced &amp; verified vs PAD' },
+    { name: 'IRAS sales (shift totals)', rows: shiftTotals.length, first: shiftTotals.length ? [...shiftTotals].sort((a, b) => (a.shift_date || '') < (b.shift_date || '') ? -1 : 1)[0].shift_date : null, last: shiftTotals.length ? [...shiftTotals].sort((a, b) => (a.shift_date || '') > (b.shift_date || '') ? -1 : 1)[0].shift_date : null, limit: 2, note: 'daily 9AM→9AM' },
+    { name: 'OCR hisaab (daily ledger)', rows: ledger.length, first: ledger.length ? ledger[0].date : null, last: ledger.length ? ledger[ledger.length - 1].date : null, limit: 7, note: 'manual OCR entry' },
+    { name: 'Settlements (PhonePe/CC)', rows: settlements.length, first: firstOf(settlements), last: lastOf(settlements), limit: 4, note: 'statement-derived' },
+    { name: 'Register offloads', rows: registerDates.length, first: firstOf(registerDates), last: lastOf(registerDates), limit: 30, note: 'physical register pages' },
+  ];
+
+  let html = '';
+  for (const s of sources) {
+    const b = behind(s.last);
+    let badge;
+    if (!s.last) badge = '<span class="badge" style="background:#f8717122;color:#f87171">no data</span>';
+    else if (b > s.limit) badge = `<span class="badge" style="background:#fbbf2422;color:#fbbf24">⚠️ ${b}d behind</span>`;
+    else badge = '<span class="badge" style="background:#4ade8022;color:#4ade80">✅ fresh</span>';
+    const range = s.first && s.first !== s.last ? `${fmtDate(s.first)} → ${fmtDate(s.last)}` : (s.last ? fmtDate(s.last) : '—');
+    html += `<tr>
+      <td><b>${s.name}</b><div class="text-muted" style="font-size:0.68rem">${s.note}</div></td>
+      <td>${s.rows ? s.rows.toLocaleString('en-IN') : '—'}</td>
+      <td>${range}</td>
+      <td style="text-align:right">${badge}</td>
+    </tr>`;
+  }
+  el.innerHTML = html;
 }
 
 // IOCL paid-vs-billed: monthly bars (bank payments vs PAD invoice debits) +
