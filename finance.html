@@ -339,7 +339,7 @@ async function loadAll() {
   try {
     const [l, c, e, s, cc, fr, nr, lube] = await Promise.all([
       query('daily_ledger', 'order=date.asc&select=date,hsd_income,ms_income,total_income,yesterday_cash,total_cash,phonepe,hdfc_card,bank_deposit,cash_picked,total_credit,total_expenses'),
-      query('credit_ledger', 'order=date.asc&select=date,party_name,type,amount'),
+      query('credit_ledger', 'order=date.asc&select=date,party_name,type,amount,source'),
       query('expense_ledger', 'order=date.asc&select=date,category,amount'),
       query('settlements', 'order=date.asc&select=date,source,amount,transactions'),
       query('cc_transactions', 'order=date.asc&select=date,batch_no,transactions,gross_amount,msf,net_payable'),
@@ -465,7 +465,7 @@ function agg(present) {
   const L = ledgerByDate();
   let hsd = 0, ms = 0, other = 0, ledgerInc = 0, exp = 0, credit = 0, pp = 0, hdfc = 0, bank = 0, picked = 0;
   let cogsTotal = 0, hsdL = 0, msL = 0;
-  let creditRepaid = 0;
+  let creditRepaid = 0, bankRepaid = 0;
   present.forEach(d => {
     const r = L[d];
     if (r) {
@@ -484,25 +484,27 @@ function agg(present) {
     const cg = cogsForDay(d);
     if (cg) { cogsTotal += cg.total; hsdL += cg.hsd_l; msL += cg.ms_l; }
   });
-  // Credit repayments in this period (from credit_ledger, type=payment/debit)
+  // Udhar repayments in this period (credit_ledger). Khata semantics:
+  //   type='credit' / 'payment' = repayment RECEIVED; type='debit' = udhar GIVEN.
+  //   source='bank_statement' = repaid direct to HDFC bank (not through the cash box).
   const { start, end } = periodRange();
   credits.forEach(c => {
     if (c.date < start || c.date > end) return;
-    if (c.type === 'payment' || c.type === 'debit') creditRepaid += Number(c.amount) || 0;
+    if (c.type !== 'credit' && c.type !== 'payment') return;
+    if (c.source === 'bank_statement') bankRepaid += Number(c.amount) || 0;
+    else creditRepaid += Number(c.amount) || 0;
   });
   // OTHER INCOME = REAL lube sales only (lubricant_sales table).
   lubeSales.forEach(x => { if (x.date >= start && x.date <= end) other += Number(x.amount) || 0; });
   // Residual = cash inflow per the hisaab beyond fuel revenue + lube. The hisaab is
   // a CASH-FLOW statement — its income line includes udhar repayments (and any other
-  // cash received), which are NOT P&L revenue. This residual is the repayments the
-  // hisaab recorded; it should match credit_ledger type=payment/debit, so a large
-  // value here with low creditRepaid means repayments were never logged in
-  // credit_ledger (data gap to fix, not an OCR error).
+  // cash received), which are NOT P&L revenue. Bank repayments never touch the cash
+  // box, so they're excluded here (shown as a separate info line in cash flow).
   const nonFuelCashIn = Math.max(0, ledgerInc - hsd - ms - creditRepaid - other);
   const opening = present.length ? (L[present[0]].yesterday_cash || 0) : 0;
   const closing = present.length ? (L[present[present.length-1]].total_cash || 0) : 0;
   const revenue = hsd + ms + other;
-  return { hsd, ms, other, nonFuelCashIn, creditRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL };
+  return { hsd, ms, other, nonFuelCashIn, creditRepaid, bankRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL };
 }
 
 function renderSummary(present) {
@@ -558,16 +560,18 @@ function renderPnl(present) {
     <div class="ledger-row total pnl-net ${net >= 0 ? 'positive' : 'negative'}"><span class="label">Net Profit (P&amp;L)</span><span class="amt">${fmtR(net)}</span></div>`;
 
   if (a.nonFuelCashIn > 500) {
-    html += `<div class="warn">\u2139\uFE0F Cash-in exceeds fuel revenue by ${fmtR(a.nonFuelCashIn)} — udhar repayments (${fmtR(a.creditRepaid)} logged) or OCR overstatement. Cheque repayments go direct to bank.</div>`;
+    html += `<div class="warn">\u2139\uFE0F Cash-in exceeds fuel revenue by ${fmtR(a.nonFuelCashIn)} — cash udhar repayments (${fmtR(a.creditRepaid)} logged) or OCR overstatement. Bank repayments go direct to HDFC.</div>`;
   }
   el.innerHTML = html;
 }
 
 function renderCashFlow(present) {
   const a = agg(present);
-  // Udhar received back during the period (payments/debits). The ledger's
-  // total_income already INCLUDES these repayments (OCR counts them as income),
-  // so we subtract them from ledger income, then show repayments as their own line.
+  // Udhar received back during the period (credit_ledger type=credit/payment).
+  // The ledger's total_income already INCLUDES the CASH repayments (OCR counts
+  // them as income), so we subtract them from ledger income, then show them as
+  // their own line. Bank repayments (source=bank_statement) never entered the
+  // cash box — shown as info only, excluded from the recon math.
   const el = document.getElementById('cfBody');
   const cfIncome = a.ledgerInc - a.creditRepaid;
   const expected = a.opening + cfIncome + a.creditRepaid - a.pp - a.hdfc - a.bank - a.picked - a.credit - a.exp;
@@ -575,7 +579,7 @@ function renderCashFlow(present) {
   let html = `
     <div class="ledger-row"><span class="label">Opening Cash</span><span class="amt">${fmtR(a.opening)}</span></div>
     <div class="ledger-row"><span class="label">+ Income (ledger, excl. repayments)</span><span class="amt text-green">+${fmtR(cfIncome)}</span></div>
-    <div class="ledger-row"><span class="label">+ Udhar Received Back</span><span class="amt text-green">+${fmtR(a.creditRepaid)}</span></div>
+    <div class="ledger-row"><span class="label">+ Udhar Received Back (cash)</span><span class="amt text-green">+${fmtR(a.creditRepaid)}</span></div>
     <div class="ledger-row"><span class="label">&minus; PhonePe Settlement</span><span class="amt text-red">&minus;${fmtR(a.pp)}</span></div>
     <div class="ledger-row"><span class="label">&minus; HDFC / Card Settlement</span><span class="amt text-red">&minus;${fmtR(a.hdfc)}</span></div>
     <div class="ledger-row"><span class="label">&minus; Bank Deposit</span><span class="amt text-red">&minus;${fmtR(a.bank)}</span></div>
@@ -583,6 +587,9 @@ function renderCashFlow(present) {
     <div class="ledger-row"><span class="label">&minus; Credits Given (Udhar)</span><span class="amt text-red">&minus;${fmtR(a.credit)}</span></div>
     <div class="ledger-row"><span class="label">&minus; Expenses (Kharcha)</span><span class="amt text-red">&minus;${fmtR(a.exp)}</span></div>
     <div class="ledger-row total cashflow-closing"><span class="label">Closing Cash</span><span class="amt">${fmtR(a.closing)}</span></div>`;
+  if (a.bankRepaid > 0) {
+    html += `<div class="warn">\u2139\uFE0F Udhar repaid via bank (direct to HDFC, not in cash box): ${fmtR(a.bankRepaid)}</div>`;
+  }
   if (Math.abs(diff) > 2) {
     html += `<div class="warn">\u26A0\uFE0F Recon gap: closing should be ${fmtR(expected)} (${fmtR(diff)} difference &mdash; missing days or data errors)</div>`;
   }
@@ -906,7 +913,8 @@ function cashFlowRows(a) {
     ['CASH FLOW'],
     ['Opening Cash', money(a.opening)],
     ['Add: Income (ledger, excl. repayments)', money(a.ledgerInc - a.creditRepaid)],
-    ['Add: Udhar Received Back', money(a.creditRepaid)],
+    ['Add: Udhar Received Back (cash)', money(a.creditRepaid)],
+    ...(a.bankRepaid > 0 ? [['  (Udhar repaid via bank — direct to HDFC)', money(a.bankRepaid)]] : []),
     ['Less: PhonePe Settlement', money(a.pp)],
     ['Less: HDFC / Card Settlement', money(a.hdfc)],
     ['Less: Bank Deposit', money(a.bank)],
