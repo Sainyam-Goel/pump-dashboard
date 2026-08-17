@@ -165,6 +165,18 @@ tr:hover td { background: #181b2844; }
   </div>
 </div>
 
+<!-- IOCL paid vs billed -->
+<div class="section-title">IOCL Paid vs Billed <span class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0">bank payments vs invoice debits — monthly bars + cumulative variance</span></div>
+<div class="card">
+  <div style="position:relative;height:240px;width:100%">
+    <canvas id="ioclChart"></canvas>
+  </div>
+  <div class="card-sub text-muted" style="padding:6px 4px 0">
+    Billed = IOCL invoice debits (PAD ledger). Paid = RTGS/auto-collect payments from the HDFC statement.
+    Cumulative variance = total paid &minus; total billed since Jan 2024 (positive = advance with IOCL).
+  </div>
+</div>
+
 <!-- Monthly revenue verification -->
 <div class="section-title">Monthly Revenue Verification <span class="text-muted" style="font-weight:500;text-transform:none;letter-spacing:0">totalizer vs ledger OCR — fraud / accounting check</span></div>
 <div class="card" style="padding:0;overflow:hidden;border-radius:14px">
@@ -257,6 +269,8 @@ let fuelRates = [];     // { date, petrol_rate, diesel_rate }
 let nozzleReceipts = []; // { date, nozzle_id, reading } — for monthly totalizer check
 let lubeSales = [];      // { date, product, quantity, amount } — real lube income (P&L)
 let padData = null;
+let bankIocl = [];     // { date, withdrawal } — IOCL payments from the HDFC statement
+let ioclChart = null;
 let chart = null;
 
 // Expense bin classification (client-side; categories written in the ledger)
@@ -359,7 +373,8 @@ async function loadAll() {
       dlRows.forEach(t => { dayLiters[t.sale_date] = { ms_l: Number(t.ms_liters) || 0, hsd_l: Number(t.hsd_liters) || 0 }; });
     } catch (err) { console.warn('daily_sales_liters:', err); dayLiters = {}; }
     try { shiftTotals = await rpc('iss_shift_totals', {}); } catch (err) { console.warn('iss_shift_totals:', err); shiftTotals = []; }
-    try { padData = await query('pad_balance', 'order=date.desc&limit=200'); } catch (err) { padData = null; console.warn('pad_balance table not available:', err); }
+    try { padData = await query('pad_balance', 'order=date.asc&limit=2000'); } catch (err) { padData = null; console.warn('pad_balance table not available:', err); }
+    try { bankIocl = await query('bank_transactions', 'category=eq.iocl&order=date.asc&select=date,withdrawal&limit=2000'); } catch (err) { bankIocl = []; console.warn('bank_transactions not available:', err); }
     latestDate = ledger.length ? ledger[ledger.length - 1].date : null;
     anchor = parseISO(latestDate);
     document.getElementById('errorBar').style.display = 'none';
@@ -456,6 +471,7 @@ function render() {
   renderCashFlow(present);
   renderSettlements(start, end);
   renderPad();
+  renderIoclVerify();
   renderMonthlyVerify();
   renderLineItems(present, start, end);
   renderTrend(present, start, end);
@@ -466,6 +482,7 @@ function agg(present) {
   let hsd = 0, ms = 0, other = 0, ledgerInc = 0, exp = 0, credit = 0, pp = 0, hdfc = 0, bank = 0, picked = 0;
   let cogsTotal = 0, hsdL = 0, msL = 0;
   let creditRepaid = 0, bankRepaid = 0;
+  let ioclMargin = 0, ioclFees = 0;
   present.forEach(d => {
     const r = L[d];
     if (r) {
@@ -496,6 +513,18 @@ function agg(present) {
   });
   // OTHER INCOME = REAL lube sales only (lubricant_sales table).
   lubeSales.forEach(x => { if (x.date >= start && x.date <= end) other += Number(x.amount) || 0; });
+  // IOCL account items for this period (from the PAD ledger):
+  //   ioclMargin = YVR464 dealer-margin credits (extra IOCL income on top of the
+  //                margin already embedded in the invoice price)
+  //   ioclFees   = non-invoice debits (e-lock, participation, leasing, license fee,
+  //                interest) — real costs missing from the kharcha ledger
+  if (padData) {
+    padData.forEach(t => {
+      if (!t.date || t.date < start || t.date > end) return;
+      if (t.type === 'CREDIT' && /Dealer Margin/.test(t.description || '')) ioclMargin += Number(t.amount) || 0;
+      else if (t.type === 'DEBIT' && !/^Product Supply Invoice/.test(t.description || '')) ioclFees += Number(t.amount) || 0;
+    });
+  }
   // Residual = cash inflow per the hisaab beyond fuel revenue + lube. The hisaab is
   // a CASH-FLOW statement — its income line includes udhar repayments (and any other
   // cash received), which are NOT P&L revenue. Bank repayments never touch the cash
@@ -504,20 +533,20 @@ function agg(present) {
   const opening = present.length ? (L[present[0]].yesterday_cash || 0) : 0;
   const closing = present.length ? (L[present[present.length-1]].total_cash || 0) : 0;
   const revenue = hsd + ms + other;
-  return { hsd, ms, other, nonFuelCashIn, creditRepaid, bankRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL };
+  return { hsd, ms, other, nonFuelCashIn, creditRepaid, bankRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL, ioclMargin, ioclFees };
 }
 
 function renderSummary(present) {
   const a = agg(present);
-  const gross = a.income - a.cogs;
-  const net = gross - a.exp;
+  const gross = a.income + a.ioclMargin - a.cogs;
+  const net = gross - a.exp - a.ioclFees;
   const el = document.getElementById('summaryCards');
   el.innerHTML = `
     <div class="card glow-card" style="--glow-color: var(--glow-diesel)">
       <div class="card-icon">&#x1F4B2;</div>
       <div class="card-title">Total Income</div>
       <div class="stat-pair"><div class="card-value text-green">${fmtR(a.income)}</div></div>
-      <div class="card-sub">HSD ${fmtR(a.hsd)} &bull; MS ${fmtR(a.ms)}${a.other ? ' &bull; Other ' + fmtR(a.other) : ''}</div>
+      <div class="card-sub">HSD ${fmtR(a.hsd)} &bull; MS ${fmtR(a.ms)}${a.other ? ' &bull; Other ' + fmtR(a.other) : ''}${a.ioclMargin ? ' &bull; IOCL margin ' + fmtR(a.ioclMargin) : ''}</div>
     </div>
     <div class="card glow-card" style="--glow-color: var(--glow-petrol)">
       <div class="card-icon">&#x1F4C9;</div>
@@ -529,14 +558,14 @@ function renderSummary(present) {
       <div class="card-icon">&#x1F4C8;</div>
       <div class="card-title">Net Profit (P&amp;L)</div>
       <div class="stat-pair"><div class="card-value ${net >= 0 ? 'text-green' : 'text-red'}">${fmtR(net)}</div></div>
-      <div class="card-sub">Income &minus; COGS &minus; Expenses</div>
+      <div class="card-sub">Income &minus; COGS &minus; Expenses${a.ioclFees ? ' &minus; IOCL fees' : ''}</div>
     </div>`;
 }
 
 function renderPnl(present) {
   const a = agg(present);
-  const gross = a.income - a.cogs;
-  const net = gross - a.exp;
+  const gross = a.income + a.ioclMargin - a.cogs;
+  const net = gross - a.exp - a.ioclFees;
   const el = document.getElementById('pnlBody');
   // Per-liter cost = retail rate − dealer margin, using the rate in force at the
   // period end (May 25+ = MS 102.48/HSD 95.14, margins 4.00/2.58).
@@ -553,10 +582,14 @@ function renderPnl(present) {
     <div class="ledger-row"><span class="label">MS Sales</span><span class="amt text-green">${fmtR(a.ms)}</span></div>`;
   if (a.other !== 0) html += `<div class="ledger-row"><span class="label">Other Income (lube sales)</span><span class="amt text-green">${fmtR(a.other)}</span></div>`;
   html += `
-    <div class="ledger-row total"><span class="label">Total Income</span><span class="amt text-green">${fmtR(a.income)}</span></div>
+    <div class="ledger-row total"><span class="label">Total Income</span><span class="amt text-green">${fmtR(a.income)}</span></div>`;
+  if (a.ioclMargin !== 0) html += `<div class="ledger-row"><span class="label">+ IOCL Dealer Margin (YVR464)</span><span class="amt text-green">+${fmtR(a.ioclMargin)}</span></div>`;
+  html += `
     <div class="ledger-row"><span class="label">COGS &mdash; ${fmtL(a.hsdL)} HSD @ ₹${hsdCost.toFixed(2)} + ${fmtL(a.msL)} MS @ ₹${msCost.toFixed(2)}</span><span class="amt text-orange">&minus;${fmtR(a.cogs)}</span></div>
     <div class="ledger-row total"><span class="label">Gross Margin</span><span class="amt ${gross >= 0 ? 'text-green' : 'text-red'}">${fmtR(gross)}</span></div>
-    <div class="ledger-row"><span class="label">Total Expenses (Kharcha)</span><span class="amt text-red">&minus;${fmtR(a.exp)}</span></div>
+    <div class="ledger-row"><span class="label">Total Expenses (Kharcha)</span><span class="amt text-red">&minus;${fmtR(a.exp)}</span></div>`;
+  if (a.ioclFees !== 0) html += `<div class="ledger-row"><span class="label">IOCL Fees &amp; Interest (e-lock, license, participation)</span><span class="amt text-red">&minus;${fmtR(a.ioclFees)}</span></div>`;
+  html += `
     <div class="ledger-row total pnl-net ${net >= 0 ? 'positive' : 'negative'}"><span class="label">Net Profit (P&amp;L)</span><span class="amt">${fmtR(net)}</span></div>`;
 
   if (a.nonFuelCashIn > 500) {
@@ -825,8 +858,61 @@ function renderLineItems(present, start, end) {
   document.getElementById('expenseBody').innerHTML = ehtml;
 }
 
-function renderTrend(present, start, end) {
-  const L = ledgerByDate();
+// IOCL paid-vs-billed: monthly bars (bank payments vs PAD invoice debits) +
+// cumulative variance line (paid − billed, all-time from Jan 2024).
+function renderIoclVerify() {
+  const el = document.getElementById('ioclChart');
+  if (!el) return;
+  const paid = {}, billed = {};
+  bankIocl.forEach(t => { const m = (t.date || '').slice(0, 7); if (m) paid[m] = (paid[m] || 0) + Number(t.withdrawal || 0); });
+  (padData || []).forEach(t => {
+    if (t.type !== 'DEBIT' || !/^Product Supply Invoice/.test(t.description || '')) return;
+    const m = (t.date || '').slice(0, 7);
+    if (m) billed[m] = (billed[m] || 0) + Number(t.amount || 0);
+  });
+  // months from the earliest data point to now
+  const months = [...new Set([...Object.keys(paid), ...Object.keys(billed)])].sort();
+  if (!months.length) { el.parentElement.innerHTML = '<div class="loading">No IOCL payment/invoice data yet</div>'; return; }
+  const labels = months.map(m => m.slice(5) + '/' + m.slice(0, 4));
+  const paidArr = months.map(m => Math.round(paid[m] || 0));
+  const billedArr = months.map(m => Math.round(billed[m] || 0));
+  let cum = 0;
+  const cumArr = months.map(m => { cum += (paid[m] || 0) - (billed[m] || 0); return Math.round(cum); });
+
+  if (ioclChart) ioclChart.destroy();
+  ioclChart = new Chart(el, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Paid (bank)', data: paidArr, backgroundColor: '#4ade8055', borderColor: '#4ade80', borderWidth: 1.5, borderRadius: 4, yAxisID: 'y' },
+        { label: 'Billed (invoices)', data: billedArr, backgroundColor: '#fbbf2455', borderColor: '#fbbf24', borderWidth: 1.5, borderRadius: 4, yAxisID: 'y' },
+        { label: 'Cumulative variance', type: 'line', data: cumArr, borderColor: '#818cf8', backgroundColor: '#818cf8', borderWidth: 2, pointRadius: 2.5, tension: 0.3, yAxisID: 'y1' },
+      ]
+    },
+    plugins: [ChartDataLabels],
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#6b7194', font: { size: 11, family: 'Inter' }, usePointStyle: true, pointStyle: 'rectRounded' } },
+        datalabels: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => ctx.dataset.label + ': ' + (ctx.parsed.y == null ? '\u2014' : '\u20B9' + Math.round(ctx.parsed.y).toLocaleString('en-IN'))
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#6b7194', font: { size: 9, family: 'Inter' }, maxRotation: 45 }, grid: { color: '#1e2133' } },
+        y: { position: 'left', ticks: { color: '#6b7194', font: { family: 'Inter' }, callback: v => '\u20B9' + (v >= 100000 ? (v / 100000) + 'L' : v).toLocaleString('en-IN') }, grid: { color: '#1e2133' } },
+        y1: { position: 'right', ticks: { color: '#818cf8', font: { family: 'Inter' }, callback: v => '\u20B9' + (v >= 100000 ? (v / 100000) + 'L' : v).toLocaleString('en-IN') }, grid: { display: false } },
+      }
+    }
+  });
+}
+
+function renderTrend(present, start, end) {  const L = ledgerByDate();
   let days;
   if (period === 'day') {
     days = [];
@@ -899,19 +985,21 @@ function periodDates() {
 // P&L section — 2 fixed columns. Labels never start with +/-/= so Excel
 // doesn't try to parse them as formulas.
 function pnlRows(a) {
-  const gross = a.income - a.cogs;
-  const net = gross - a.exp;
+  const gross = a.income + a.ioclMargin - a.cogs;
+  const net = gross - a.exp - a.ioclFees;
   return [
     ['PROFIT & LOSS'],
     ['HSD Sales', money(a.hsd)],
     ['MS Sales', money(a.ms)],
     ['Other Income (lube sales)', money(a.other)],
     ['Total Income (IRAS revenue + lube)', money(a.income)],
+    ['IOCL Dealer Margin (YVR464)', money(a.ioclMargin)],
     ['COGS', money(a.cogs)],
     ['  COGS HSD liters', money(a.hsdL)],
     ['  COGS MS liters', money(a.msL)],
     ['Gross Margin', money(gross)],
     ['Total Expenses (Kharcha)', money(a.exp)],
+    ['IOCL Fees & Interest', money(a.ioclFees)],
     ['Net Profit (P&L)', money(net)],
   ];
 }
