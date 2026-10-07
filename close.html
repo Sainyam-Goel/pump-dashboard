@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jansheel — Daily Close</title><style>
+body{font:16px system-ui;background:#101322;color:#e5e7eb;max-width:760px;margin:auto;padding:24px}
+input,select,textarea,button{font:inherit;padding:10px;border-radius:8px;margin:6px 0;box-sizing:border-box}
+input,select,textarea{width:100%;background:#1c2338;color:inherit;border:1px solid #43506a}
+button{background:#f0b429;border:0;cursor:pointer}section{background:#171d30;padding:18px;margin:18px 0;border-radius:14px}
+label{display:block;margin:12px 0 4px}small{color:#a3adc1}textarea{min-height:90px}a{color:#f0b429}.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+</style></head><body>
+<h1>Daily close</h1><p>Enter an independently counted cash balance and classified movements. Fuel sales come from the machine.</p>
+<a href="finance.html">← Finance</a>
+<section id="login"><label>Operator email</label><input id="email" type="email" value="bansiwalafs@gmail.com">
+<button id="signIn">Email me a login link</button><small>Only the approved pump operator can save records.</small></section>
+<form id="closeForm" hidden><section>
+<div class="row"><div><label>Reporting date</label><input id="date" type="date" required></div><div><label>Basis</label><select id="basis"><option value="calendar">IST calendar day</option><option value="manager_shift">Manager closing shift</option></select></div></div>
+<label>Physical cash counted at (IST)</label><input id="countedAt" type="datetime-local" required>
+<div class="row"><div><label>Opening cash ₹</label><input id="opening" type="number" min="0" step=".01" required></div><div><label>Independently counted closing cash ₹</label><input id="closing" type="number" min="0" step=".01" required></div></div>
+<div class="row"><div><label>Cash deposited into bank ₹</label><input id="deposit" type="number" min="0" value="0"></div><div><label>Cash picked up ₹</label><input id="picked" type="number" min="0" value="0"></div></div>
+<label>Other cash received ₹</label><input id="other" type="number" min="0" value="0">
+</section><section><h2>Expenses / withdrawals</h2><small>One per line: category | amount | expense/drawing/advance/capital/personal</small>
+<textarea id="expenses" placeholder="Staff wages | 500 | expense"></textarea>
+<h2>Customer credit / repayments</h2><small>party | amount | credit_given/repayment | cash/bank | reference (required for bank)</small>
+<textarea id="credits" placeholder="Customer name | 1000 | repayment | bank | UTR123"></textarea>
+<h2>Testing return / DG consumption</h2><small>test_return/dg_consumption | MS/HSD | measured litres | actual time (YYYY-MM-DDTHH:mm)</small>
+<textarea id="movements" placeholder="test_return | MS | 10 | 2026-10-06T10:30"></textarea>
+<label>Notes</label><textarea id="notes"></textarea>
+<label>Reason if correcting an existing close</label><input id="reason" placeholder="What changed and why">
+<button type="submit">Save verified entry</button></section></form><p id="status" role="status"></p>
+<script type="module">
+import {createClient} from 'https://esm.sh/@supabase/supabase-js@2';
+const base='https://zkomggcvakdocbgrglkn.supabase.co';
+const key='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inprb21nZ2N2YWtkb2NiZ3JnbGtuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4NjI5MjIsImV4cCI6MjA5MDQzODkyMn0.Ma3NTFbjiLk4iFN7jgA3jXWT7m3di6gayD3svsnwQpc';
+const client=createClient(base,key);const $=id=>document.getElementById(id);
+const status=message=>{$('status').textContent=message;};
+const today=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});$('date').value=today;$('date').max=today;
+const local=new Date(Date.now()+5.5*3600e3).toISOString().slice(0,16);$('countedAt').value=local;
+function lines(id){return $(id).value.split('\n').filter(line=>line.trim()).map(line=>line.split('|').map(part=>part.trim()));}
+$('signIn').onclick=async()=>{
+  const {error}=await client.auth.signInWithOtp({email:$('email').value.trim(),options:{shouldCreateUser:false,emailRedirectTo:location.href.split('#')[0]}});
+  status(error?error.message:'Login link sent. Open it to save the close.');
+};
+async function authorize(){const {data}=await client.auth.getSession();if(!data.session)return;
+  const {data:allowed,error}=await client.rpc('is_pump_operator');
+  if(error||!allowed){status('This account is not an approved operator.');return;}
+  $('login').hidden=true;$('closeForm').hidden=false;
+}
+client.auth.onAuthStateChange(()=>{setTimeout(authorize,0);});await authorize();
+$('closeForm').onsubmit=async event=>{event.preventDefault();try{
+  const {data:prior,error:readError}=await client.from('operator_closes').select('revision').eq('date',$('date').value).eq('basis',$('basis').value).maybeSingle();
+  if(readError)throw readError;
+  const payload={date:$('date').value,basis:$('basis').value,counted_at:new Date($('countedAt').value+'+05:30').toISOString(),
+    opening_cash:Number($('opening').value),closing_cash:Number($('closing').value),bank_deposit:Number($('deposit').value),
+    cash_picked:Number($('picked').value),other_cash_income:Number($('other').value),notes:$('notes').value,
+    expenses:lines('expenses').map(([category,amount,kind])=>({category,amount:Number(amount),kind})),
+    credit_events:lines('credits').map(([party_name,amount,kind,method,reference])=>({party_name,amount:Number(amount),kind,method,reference})),
+    fuel_movements:lines('movements').map(([kind,product,litres,time])=>({kind,product,litres:Number(litres),occurred_at:new Date(time+'+05:30').toISOString()}))};
+  const {data,error}=await client.rpc('submit_operator_close',{p_close:payload,p_expected_revision:prior?.revision||0,p_reason:$('reason').value||null});
+  if(error)throw error;status('Saved. Revision '+data.revision+'. The source entry and correction history are retained.');
+}catch(error){status(error.message||String(error));}};
+</script></body></html>

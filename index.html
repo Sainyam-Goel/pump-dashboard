@@ -378,8 +378,16 @@ function fmtTime(t) {
 }
 
 async function query(table, params = '') {
-  const res = await fetch(`${SUPABASE_URL}/${table}?${params}`, { headers: HEADERS });
-  return res.json();
+  const queryParams=new URLSearchParams(params);const maximum=Number(queryParams.get('limit'))||Infinity;
+  queryParams.delete('limit');let rows=[],offset=0;
+  while(rows.length<maximum){
+    const size=Math.min(500,maximum-rows.length);queryParams.set('limit',String(size));queryParams.set('offset',String(offset));
+    const res=await fetch(`${SUPABASE_URL}/${table}?${queryParams}`,{headers:HEADERS});
+    if(!res.ok) throw new Error(`${table}: HTTP ${res.status}`);
+    const page=await res.json();if(!Array.isArray(page)) throw new Error(`${table}: unexpected response`);
+    rows.push(...page);if(page.length<size) break;offset+=page.length;
+  }
+  return rows;
 }
 
 let shiftSummaryPromise = null;
@@ -391,7 +399,7 @@ async function getShiftSummary() {
   const dateRows = await query('iras_transactions', 'order=date.desc&limit=2&select=date');
   if (!dateRows.length) return null;
   const latest = dateRows[0].date;
-  const todayISO = new Date().toLocaleDateString('en-CA');
+  const todayISO = new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
   const shiftDate = (latest === todayISO && dateRows.length > 1) ? dateRows[1].date : latest;
 
   if (shiftSummaryPromise && shiftSummaryDate === shiftDate) return shiftSummaryPromise;
@@ -454,7 +462,8 @@ async function loadCashCredits() {
 }
 
 async function loadFuelRate() {
-  const rows = await query('fuel_rates', 'order=date.desc&limit=1');
+  const today=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
+  const rows=await query('fuel_rates',`date=lte.${today}&order=date.desc&limit=1`);
   if (!rows.length) return;
   const r = rows[0];
   document.getElementById('petrolRate').textContent = fmtR(r.petrol_rate);
@@ -469,7 +478,8 @@ async function loadTanks() {
   const warnings = [];
 
   function setTank(prefix, vol, water, barId, pctId, waterId) {
-    const v = Number(vol) || 0;
+    if(vol==null){document.getElementById(prefix).textContent='Unknown';document.getElementById(pctId).textContent='—';return;}
+    const v=Number(vol);
     const pct = Math.min(100, (v / TANK_CAPACITY) * 100);
     document.getElementById(prefix).textContent = Math.round(v) + ' L';
     document.getElementById(barId).style.width = pct + '%';
@@ -488,9 +498,12 @@ async function loadTanks() {
 
   document.getElementById('tankDate').textContent = '\u2014 ' + fmtDate(t.date) + (t.time_str ? ', ' + fmtTime(t.time_str) : '');
 
-  setTank('msVol', t.ms_volume, t.ms_water, 'msBar', 'msPct', 'msWater');
-  setTank('hsdT1Vol', t.hsd_t1_volume, t.hsd_t1_water, 'hsdT1Bar', 'hsdT1Pct', 'hsdT1Water');
-  setTank('hsdT2Vol', t.hsd_t2_volume, t.hsd_t2_water, 'hsdT2Bar', 'hsdT2Pct', 'hsdT2Water');
+  const live=await query('live_tank_levels','order=tank_no');
+  const level=tank=>live.find(row=>row.tank_no===tank);
+  setTank('msVol', level('1')?.volume??t.ms_volume, level('1')?.water??t.ms_water, 'msBar', 'msPct', 'msWater');
+  setTank('hsdT1Vol', level('2')?.volume??t.hsd_t1_volume, level('2')?.water??t.hsd_t1_water, 'hsdT1Bar', 'hsdT1Pct', 'hsdT1Water');
+  setTank('hsdT2Vol', level('3')?.volume??t.hsd_t2_volume, level('3')?.water??t.hsd_t2_water, 'hsdT2Bar', 'hsdT2Pct', 'hsdT2Water');
+  if(live.length) document.getElementById('tankDate').textContent='— '+live.map(row=>`T${row.tank_no} ${new Date(row.observed_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})}`).join(' | ')+' IST';
 
   const warnEl = document.getElementById('warnings');
   if (warnings.length) {
@@ -561,9 +574,9 @@ async function loadTankChart() {
     data: {
       labels,
       datasets: [
-        { label: 'MS (T1)',  data: msSeries, borderColor: '#f0b429', backgroundColor: '#f0b42922', borderWidth: 2, pointRadius: 0, tension: 0.25, spanGaps: true },
-        { label: 'HSD T1 (T2)', data: t1Series, borderColor: '#4ade80', backgroundColor: '#4ade8022', borderWidth: 2, pointRadius: 0, tension: 0.25, spanGaps: true },
-        { label: 'HSD T2 (T3)', data: t2Series, borderColor: '#22d3ee', backgroundColor: '#22d3ee22', borderWidth: 2, pointRadius: 0, tension: 0.25, spanGaps: true },
+        { label: 'MS (T1)',  data: msSeries, borderColor: '#f0b429', backgroundColor: '#f0b42922', borderWidth: 2, pointRadius: 0, tension: 0.25, spanGaps: false },
+        { label: 'HSD T1 (T2)', data: t1Series, borderColor: '#4ade80', backgroundColor: '#4ade8022', borderWidth: 2, pointRadius: 0, tension: 0.25, spanGaps: false },
+        { label: 'HSD T2 (T3)', data: t2Series, borderColor: '#22d3ee', backgroundColor: '#22d3ee22', borderWidth: 2, pointRadius: 0, tension: 0.25, spanGaps: false },
       ]
     },
     options: {
@@ -595,6 +608,13 @@ async function loadTankChart() {
 }
 
 async function loadTanker() {
+  const received=await query('v_shipment_status','physical_status=eq.received-evidence&order=received_date.desc.nullslast,invoice_date.desc&limit=1');
+  if(received.length){const shipment=received[0];
+    document.getElementById('tankerMS').textContent=fmt(Number(shipment.petrol_kl)*1000)+' L billed';
+    document.getElementById('tankerHSD').textContent=fmt(Number(shipment.diesel_kl)*1000)+' L billed';
+    document.getElementById('tankerDate').textContent=fmtDate(shipment.received_date||shipment.invoice_date)+' | physical receipt evidence | '+shipment.sap_entry_no+' | measured total '+(shipment.measured_received_l==null?'unknown':fmt(shipment.measured_received_l)+' L');
+  }else document.getElementById('tankerDate').textContent='No verified physical receipt evidence';
+  return;
   const [unloading, tracker] = await Promise.all([
     query('tanker_unloading', 'order=date.desc&limit=1'),
     query('fuel_tanker_tracker', 'order=date.desc&limit=1'),
@@ -636,14 +656,14 @@ async function loadTanker() {
 }
 
 async function loadSettlements() {
-  const phonepe = await query('settlements', 'source=ilike.phonepe&order=date.desc&limit=1');
-  const cc = await query('settlements', 'source=ilike.*cc*&order=date.desc&limit=1');
+  const phonepe=await query('v_digital_settlements_daily','provider=eq.phonepe&order=date.desc&limit=1');
+  const cc=await query('v_digital_settlements_daily','provider=eq.cc_machine&order=date.desc&limit=1');
   if (phonepe.length) {
-    document.getElementById('phonepeAmt').textContent = fmtR(phonepe[0].amount);
+    document.getElementById('phonepeAmt').textContent=fmtR(phonepe[0].net_amount);
     if (phonepe[0].transactions) document.getElementById('phonepeTxns').textContent = phonepe[0].transactions + ' txns';
   }
   if (cc.length) {
-    document.getElementById('ccAmt').textContent = fmtR(cc[0].amount);
+    document.getElementById('ccAmt').textContent=fmtR(cc[0].net_amount);
     if (cc[0].transactions) document.getElementById('ccTxns').textContent = cc[0].transactions + ' txns';
   }
   const dates = [];
@@ -957,7 +977,13 @@ function renderChart(period) {
 
 async function loadAll() {
   loadErrors.length = 0;
+  shiftSummaryPromise=null;shiftSummaryDate=null;
+  let operations=document.getElementById('operationsCenter');
+  if(!operations){operations=document.createElement('div');operations.id='operationsCenter';
+    const content=document.getElementById('loadErrors');content.insertAdjacentElement('afterend',operations);}
   await Promise.all([
+    safe('operational actions',async()=>{const module=await import('./operations-ui.mjs');
+      await module.loadOperations(SUPABASE_URL,HEADERS,operations);}),
     safe('sales', loadSales),
     safe('cash/credits', loadCashCredits),
     safe('fuel rate', loadFuelRate),

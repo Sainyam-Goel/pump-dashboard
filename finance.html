@@ -248,6 +248,8 @@ tr:hover td { background: #181b2844; }
 const SUPABASE_URL = 'https://zkomggcvakdocbgrglkn.supabase.co/rest/v1';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inprb21nZ2N2YWtkb2NiZ3JnbGtuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4NjI5MjIsImV4cCI6MjA5MDQzODkyMn0.Ma3NTFbjiLk4iFN7jgA3jXWT7m3di6gayD3svsnwQpc';
 const HEADERS = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` };
+let financeModel;
+const modelReady=import('./finance-model.mjs').then(module=>{financeModel=module;});
 
 // Dealer margins by price period — VERIFIED from 33 IOCL invoice line items
 // (local invoice PDFs: 7004824057 … 7009672342). Margins = retail − invoice cost.
@@ -278,6 +280,12 @@ let ledger = [];
 let credits = [];
 let expenses = [];
 let shiftTotals = [];   // { shift_date, hsd_liters, ms_liters, ... } — legacy, not used for COGS
+let calendarSales=[];
+let supplierAccounts=[];
+let supplierStatements=[];
+let digitalSales=[];
+let digitalSettlements=[];
+let customerBalances=[];
 let dayLiters = {};     // { date: { ms_l, hsd_l } } — calendar-day liters from iras_transactions (matches daily_ledger income frame)
 let settlements = [];   // { date, source, amount, transactions }
 let ccTxns = [];        // { date, gross_amount, msf, net_payable, batch_no }
@@ -355,9 +363,19 @@ function iso(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart
 function parseISO(s) { return new Date(s + 'T00:00:00'); }
 
 async function query(table, params = '') {
-  const res = await fetch(`${SUPABASE_URL}/${table}?${params}`, { headers: HEADERS });
-  if (!res.ok) throw new Error(`${table}: HTTP ${res.status}`);
-  return res.json();
+  const parameters=new URLSearchParams(params);
+  const maximum=Number(parameters.get('limit'))||Infinity;
+  parameters.delete('limit');parameters.delete('offset');
+  let rows=[],offset=0;
+  while(rows.length<maximum){
+    parameters.set('limit',String(Math.min(500,maximum-rows.length)));parameters.set('offset',String(offset));
+    const res=await fetch(`${SUPABASE_URL}/${table}?${parameters}`,{headers:HEADERS});
+    if(!res.ok) throw new Error(`${table}: HTTP ${res.status}`);
+    const page=await res.json();if(!Array.isArray(page)) throw new Error(`${table}: unexpected response`);
+    rows.push(...page);if(page.length<Math.min(500,maximum-(rows.length-page.length))) break;
+    offset+=page.length;
+  }
+  return rows;
 }
 
 async function rpc(name, body = {}) {
@@ -370,10 +388,11 @@ async function rpc(name, body = {}) {
 
 async function loadAll() {
   try {
+    await modelReady;
     const [l, c, e, s, cc, fr, nr, lube] = await Promise.all([
-      query('daily_ledger', 'order=date.asc&select=date,hsd_income,ms_income,total_income,yesterday_cash,total_cash,phonepe,hdfc_card,bank_deposit,cash_picked,total_credit,total_expenses'),
-      query('credit_ledger', 'order=date.asc&select=date,party_name,type,amount,source'),
-      query('expense_ledger', 'order=date.asc&select=date,category,amount'),
+      query('v_reported_daily_inputs', 'order=date.asc&select=date,hsd_income,ms_income,total_income,yesterday_cash,total_cash,phonepe,hdfc_card,bank_deposit,cash_picked,total_credit,total_expenses'),
+      query('v_credit_events', 'order=date.asc&select=date,party_name,type,amount,source,ref_no'),
+      query('v_expense_events', 'order=date.asc&select=date,category,amount'),
       query('settlements', 'order=date.asc&select=date,source,amount,transactions'),
       query('cc_transactions', 'order=date.asc&select=date,batch_no,transactions,gross_amount,msf,net_payable'),
       query('fuel_rates', 'order=date.asc&select=date,petrol_rate,diesel_rate'),
@@ -384,20 +403,19 @@ async function loadAll() {
     // Calendar-day liters from the daily_sales_liters RPC (server-side aggregation,
     // matches the daily_ledger income frame). NOTE: the 9AM→9AM shift RPC
     // (iss_shift_totals) bleeds into adjacent days and is NOT used for COGS.
-    try {
-      const first = ledger.length ? ledger[0].date : '2026-02-08';
-      const last = ledger.length ? ledger[ledger.length - 1].date : new Date().toLocaleDateString('en-CA');
-      const dlRows = await rpc('daily_sales_liters', { from_date: first, to_date: last });
-      dayLiters = {};
-      dlRows.forEach(t => { dayLiters[t.sale_date] = { ms_l: Number(t.ms_liters) || 0, hsd_l: Number(t.hsd_liters) || 0 }; });
-    } catch (err) { console.warn('daily_sales_liters:', err); dayLiters = {}; }
-    try { shiftTotals = await rpc('iss_shift_totals', {}); } catch (err) { console.warn('iss_shift_totals:', err); shiftTotals = []; }
-    try { padData = await query('pad_balance', 'order=date.asc&limit=2000'); } catch (err) { padData = null; console.warn('pad_balance table not available:', err); }
+    [calendarSales,padData,supplierAccounts,supplierStatements,digitalSales,digitalSettlements,customerBalances]=await Promise.all([
+      query('v_finance_sales_daily','order=date.asc'),query('supplier_ledger_entries','order=date.asc'),
+      query('v_supplier_account','order=company_code'),query('supplier_statements','order=period_start.asc'),
+      query('v_digital_sales_daily','order=date.asc'),query('v_digital_settlements_daily','order=date.asc'),
+      query('v_customer_balances','order=party_name')]);
+    shiftTotals=calendarSales.map(row=>({...row,shift_date:row.date,hsd_income:row.hsd_revenue,ms_income:row.ms_revenue}));
+    dayLiters=Object.fromEntries(calendarSales.map(row=>[row.date,{ms_l:Number(row.ms_liters)||0,hsd_l:Number(row.hsd_liters)||0}]));
     try { bankIocl = await query('bank_transactions', 'category=eq.iocl&order=date.asc&select=date,withdrawal&limit=2000'); } catch (err) { bankIocl = []; console.warn('bank_transactions not available:', err); }
     try { bankAll = await query('bank_transactions', 'order=date.asc&select=date&limit=5000'); } catch (err) { bankAll = []; }
     try { invoiceDates = await query('fuel_tanker_tracker', 'order=date.asc&select=date&limit=1000'); } catch (err) { invoiceDates = []; }
     try { registerDates = await query('tanker_unloading', 'order=date.asc&select=date&limit=1000'); } catch (err) { registerDates = []; }
-    latestDate = ledger.length ? ledger[ledger.length - 1].date : null;
+    const today=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
+    latestDate=calendarSales.filter(row=>row.date<today).at(-1)?.date || ledger.at(-1)?.date || null;
     anchor = parseISO(latestDate);
     document.getElementById('errorBar').style.display = 'none';
     render();
@@ -421,7 +439,7 @@ function nav(dir) {
   if (!anchor) return;
   if (period === 'day') anchor.setDate(anchor.getDate() + dir);
   else if (period === 'week') anchor.setDate(anchor.getDate() + 7 * dir);
-  else anchor.setMonth(anchor.getMonth() + dir);
+  else {anchor.setDate(1);anchor.setMonth(anchor.getMonth()+dir);}
   render();
 }
 
@@ -441,15 +459,10 @@ function rateOn(date) {
 
 // COGS for a day: calendar-day liters × (retail rate − date-aware dealer margin)
 function cogsForDay(date) {
-  const r = rateOn(date);
-  if (!r.ms && !r.hsd) return null;
-  const m = marginOn(date);
-  const dl = dayLiters[date] || { ms_l: 0, hsd_l: 0 };
-  const hsdL = dl.hsd_l || 0;
-  const msL = dl.ms_l || 0;
-  const msCogs = r.ms ? msL * (r.ms - m.ms) : 0;
-  const hsdCogs = r.hsd ? hsdL * (r.hsd - m.hsd) : 0;
-  return { hsd_l: hsdL, ms_l: msL, hsd: hsdCogs, ms: msCogs, total: msCogs + hsdCogs, rate_ms: r.ms, rate_hsd: r.hsd };
+  const row=calendarSales.find(row=>row.date===date);
+  if(!row || row.fuel_cost_estimate==null || Number(row.invalid_sales)>0) return null;
+  return {hsd_l:Number(row.hsd_liters)||0,ms_l:Number(row.ms_liters)||0,
+    hsd:Number(row.hsd_cost_estimate)||0,ms:Number(row.ms_cost_estimate)||0,total:Number(row.fuel_cost_estimate)};
 }
 
 function periodRange() {
@@ -486,7 +499,7 @@ function render() {
   document.getElementById('periodLabel').textContent = periodLabel();
   const { start, end } = periodRange();
   const dates = daysInRange(start, end);
-  const present = dates.filter(d => ledgerByDate()[d]);
+  const present = dates.filter(d => calendarSales.some(row=>row.date===d) || ledgerByDate()[d]);
 
   renderSummary(present);
   renderPnl(present);
@@ -514,7 +527,7 @@ function agg(present) {
       exp += r.total_expenses || 0; credit += r.total_credit || 0;
       pp += r.phonepe || 0; hdfc += r.hdfc_card || 0; bank += r.bank_deposit || 0; picked += r.cash_picked || 0;
     }
-    // P&L REVENUE from IRAS shift totals (machine-accurate, income = liters × retail).
+    // Calendar-day revenue and cost use the same classified transactions.
     // The OCR daily_ledger hsd_income/ms_income are unreliable (HSD/MS swapped or
     // inflated on many days — verified Jul 2026: 30/30 days inconsistent with liters).
     const st = shiftTotals.find(x => x.shift_date === d);
@@ -544,8 +557,8 @@ function agg(present) {
   if (padData) {
     padData.forEach(t => {
       if (!t.date || t.date < start || t.date > end) return;
-      if (t.type === 'CREDIT' && /Dealer Margin/.test(t.description || '')) ioclMargin += Number(t.amount) || 0;
-      else if (t.type === 'DEBIT' && !/^Product Supply Invoice/.test(t.description || '')) ioclFees += Number(t.amount) || 0;
+      if(t.category==='dealer_margin') ioclMargin+=Number(t.credit)||0;
+      if(t.category==='fee') ioclFees+=Number(t.debit)||0;
     });
   }
   // Residual = cash inflow per the hisaab beyond fuel revenue + lube. The hisaab is
@@ -553,16 +566,22 @@ function agg(present) {
   // cash received), which are NOT P&L revenue. Bank repayments never touch the cash
   // box, so they're excluded here (shown as a separate info line in cash flow).
   const nonFuelCashIn = Math.max(0, ledgerInc - hsd - ms - creditRepaid - other);
-  const opening = present.length ? (L[present[0]].yesterday_cash || 0) : 0;
-  const closing = present.length ? (L[present[present.length-1]].total_cash || 0) : 0;
+  const manual=present.filter(date=>L[date]);
+  const opening=manual.length?L[manual[0]].yesterday_cash:null;
+  const closing=manual.length?L[manual.at(-1)].total_cash:null;
+  const requested=daysInRange(start,end);
+  const complete=requested.every(date=>L[date] && cogsForDay(date) &&
+    calendarSales.find(row=>row.date===date)?.captured_full_window &&
+    supplierStatements.some(row=>row.period_start<=date && row.period_end>=date && row.complete && row.verified_chain));
   const revenue = hsd + ms + other;
-  return { hsd, ms, other, nonFuelCashIn, creditRepaid, bankRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL, ioclMargin, ioclFees };
+  if(present.some(date=>!cogsForDay(date))) cogsTotal=null;
+  return { hsd, ms, other, nonFuelCashIn, creditRepaid, bankRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL, ioclMargin, ioclFees,complete,manualDays:manual.length,requestedDays:requested.length };
 }
 
 function renderSummary(present) {
   const a = agg(present);
-  const gross = a.income + a.ioclMargin - a.cogs;
-  const net = gross - a.exp - a.ioclFees;
+  const gross=financeModel.pnlEstimate(a).gross;
+  const net=financeModel.pnlEstimate(a).net;
   const el = document.getElementById('summaryCards');
   el.innerHTML = `
     <div class="card glow-card" style="--glow-color: var(--glow-diesel)">
@@ -573,22 +592,22 @@ function renderSummary(present) {
     </div>
     <div class="card glow-card" style="--glow-color: var(--glow-petrol)">
       <div class="card-icon">&#x1F4C9;</div>
-      <div class="card-title">COGS (Fuel Cost)</div>
+      <div class="card-title">Estimated Fuel Cost</div>
       <div class="stat-pair"><div class="card-value text-orange">${fmtR(a.cogs)}</div></div>
       <div class="card-sub">${fmtL(a.hsdL)} HSD + ${fmtL(a.msL)} MS (incl. margin)</div>
     </div>
     <div class="card glow-card" style="--glow-color: var(--glow-green)">
       <div class="card-icon">&#x1F4C8;</div>
-      <div class="card-title">Net Profit (P&amp;L)</div>
+      <div class="card-title">Operating Estimate</div>
       <div class="stat-pair"><div class="card-value ${net >= 0 ? 'text-green' : 'text-red'}">${fmtR(net)}</div></div>
-      <div class="card-sub">Income &minus; COGS &minus; Expenses${a.ioclFees ? ' &minus; IOCL fees' : ''}</div>
+      <div class="card-sub">IST calendar day. ${a.complete?'Matched inputs':'Incomplete inputs — '+a.manualDays+'/'+a.requestedDays+' manual closes'}</div>
     </div>`;
 }
 
 function renderPnl(present) {
   const a = agg(present);
-  const gross = a.income + a.ioclMargin - a.cogs;
-  const net = gross - a.exp - a.ioclFees;
+  const gross=financeModel.pnlEstimate(a).gross;
+  const net=financeModel.pnlEstimate(a).net;
   const el = document.getElementById('pnlBody');
   // Per-liter cost = retail rate − dealer margin, using the rate in force at the
   // period end (May 25+ = MS 102.48/HSD 95.14, margins 4.00/2.58).
@@ -608,12 +627,13 @@ function renderPnl(present) {
     <div class="ledger-row total"><span class="label">Total Income</span><span class="amt text-green">${fmtR(a.income)}</span></div>`;
   if (a.ioclMargin !== 0) html += `<div class="ledger-row"><span class="label">+ IOCL Dealer Margin (YVR464)</span><span class="amt text-green">+${fmtR(a.ioclMargin)}</span></div>`;
   html += `
-    <div class="ledger-row"><span class="label">COGS &mdash; ${fmtL(a.hsdL)} HSD @ ₹${hsdCost.toFixed(2)} + ${fmtL(a.msL)} MS @ ₹${msCost.toFixed(2)}</span><span class="amt text-orange">&minus;${fmtR(a.cogs)}</span></div>
+    <div class="ledger-row"><span class="label">Estimated fuel cost — transaction-day prices and matching litres</span><span class="amt text-orange">&minus;${fmtR(a.cogs)}</span></div>
     <div class="ledger-row total"><span class="label">Gross Margin</span><span class="amt ${gross >= 0 ? 'text-green' : 'text-red'}">${fmtR(gross)}</span></div>
     <div class="ledger-row"><span class="label">Total Expenses (Kharcha)</span><span class="amt text-red">&minus;${fmtR(a.exp)}</span></div>`;
   if (a.ioclFees !== 0) html += `<div class="ledger-row"><span class="label">IOCL Fees &amp; Interest (e-lock, license, participation)</span><span class="amt text-red">&minus;${fmtR(a.ioclFees)}</span></div>`;
   html += `
-    <div class="ledger-row total pnl-net ${net >= 0 ? 'positive' : 'negative'}"><span class="label">Net Profit (P&amp;L)</span><span class="amt">${fmtR(net)}</span></div>`;
+    <div class="ledger-row total pnl-net ${net >= 0 ? 'positive' : 'negative'}"><span class="label">Operating estimate (calendar day)</span><span class="amt">${fmtR(net)}</span></div>`;
+  if(!a.complete) html+='<div class="warn">Required sales coverage, manual costs or complete supplier statements are missing. Net estimate remains unavailable.</div>';
 
   if (a.nonFuelCashIn > 500) {
     html += `<div class="warn">\u2139\uFE0F Cash-in exceeds fuel revenue by ${fmtR(a.nonFuelCashIn)} — cash udhar repayments (${fmtR(a.creditRepaid)} logged) or OCR overstatement. Bank repayments go direct to HDFC.</div>`;
@@ -623,6 +643,7 @@ function renderPnl(present) {
 
 function renderCashFlow(present) {
   const a = agg(present);
+  if(!a.manualDays){document.getElementById('cfBody').innerHTML='<div class="warn">No manager cash close entered for this period. Cash is unknown.</div>';return;}
   // Udhar received back during the period (credit_ledger type=credit/payment).
   // The ledger's total_income already INCLUDES the CASH repayments (OCR counts
   // them as income), so we subtract them from ledger income, then show them as
@@ -653,6 +674,26 @@ function renderCashFlow(present) {
 }
 
 function renderSettlements(start, end) {
+  const rows=digitalSales.filter(row=>row.date>=start && row.date<=financeModel.shiftDate(end,1));
+  const claims=ledger.filter(row=>row.date>=start && row.date<=end);
+  let html='';
+  for(const [provider,key,label] of [['phonepe','phonepe','PhonePe'],['cc_machine','hdfc_card','Card']]){
+    const result=financeModel.allocateCollections(claims.map(row=>({date:row.date,amount:row[key]})),
+      rows.filter(row=>row.provider===provider).map(row=>({date:row.date,amount:row.gross_amount})),0);
+    const statement=rows.filter(row=>row.provider===provider && row.date<=end);
+    const gross=statement.reduce((sum,row)=>sum+Number(row.gross_amount),0);
+    const fees=statement.reduce((sum,row)=>sum+Number(row.fees),0);
+    const net=statement.reduce((sum,row)=>sum+Number(row.net_amount),0);
+    html+=`<div class="ledger-row"><span class="label">${label} gross collections (transaction day)</span><span class="amt">${fmtR(gross)}</span></div>`;
+    html+=`<div class="ledger-row"><span class="label">Fees / adjustments → net proceeds</span><span class="amt">${fmtR(fees)} → ${fmtR(net)}</span></div>`;
+    html+=`<div class="card-sub">Ledger claim ${fmtR(result.claimed)}; allocated once ${fmtR(result.matched)}; unmatched claims ${fmtR(result.unmatched_claim)}, unallocated records ${fmtR(result.unmatched_records)}.</div>`;
+    if(!statement.length) html+='<div class="warn">Statement coverage is unavailable for this period; zero is not verified.</div>';
+  }
+  html+='<div class="card-sub">Calendar-day gross is compared with reported ledger claims. Manager closing-shift timing can differ. Settlement/value dates and bank credits are separate facts.</div>';
+  document.getElementById('settlementBody').innerHTML=html;
+  return;
+  {
+  /* Legacy matching retained below for historical reference; no longer executed. */
   const L = ledgerByDate();
   // Aggregate ledger claims vs settlement records per source for the period.
   // Settlements land ~1 day AFTER the sale (ledger day D settles on D or D+1),
@@ -708,9 +749,22 @@ function renderSettlements(start, end) {
   html += `<div class="card-sub text-muted" style="margin-top:8px">Ledger ${fmtDate(start)} &rarr; ${fmtDate(end)}. PhonePe matched with 1-day bank lag; ${ppCoverage}/${dates.length} days have settlement records.</div>`;
   el.innerHTML = html;
 }
+}
 
 function renderPad() {
   const el = document.getElementById('padBody');
+  if(!supplierAccounts.length){el.innerHTML='<div class="warn">No verified supplier statement is available.</div>';return;}
+  let html='';
+  for(const account of supplierAccounts){
+    const balance=Number(account.closing_balance);
+    html+=`<div class="pad-balance ${balance>0?'text-red':'text-green'}">${fmtR(Math.abs(balance))} ${balance>0?'owed':'advance'}</div>`;
+    html+=`<div class="card-sub">Company ${financeModel.escapeHtml(account.company_code)} · captured ${new Date(account.captured_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})} IST. Running-balance chain verified.</div>`;
+    if(account.net_all_company_balance!=null) html+=`<div class="card-sub">Portal net all-company balance: ${fmtR(account.net_all_company_balance)} (shown separately from the company closing balance).</div>`;
+  }
+  for(const entry of [...(padData||[])].reverse().slice(0,5)) html+=`<div class="line-item"><span class="desc">${fmtDate(entry.date)} ${financeModel.escapeHtml(entry.description)}</span><span class="amt">${Number(entry.credit)>0?'+':'−'}${fmtR(Number(entry.credit)||Number(entry.debit))}</span></div>`;
+  el.innerHTML=html;return;
+  {
+  /* Historical bookmarklet consumer, superseded by verified statement data. */
   if (!padData || !padData.length) {
     el.innerHTML = `<div class="text-muted" style="font-size:0.82rem">No PAD balance data. <br>Set up the <code>pad_balance</code> table and sync via the SDMS bookmarklet (see repo).</div>`;
     return;
@@ -741,9 +795,22 @@ function renderPad() {
   }
   el.innerHTML = html;
 }
+}
 
 function renderMonthlyVerify() {
   const el = document.getElementById('monthlyVerifyBody');
+  const months={};
+  for(const row of calendarSales){
+    const month=row.date.slice(0,7);
+    const item=months[month] ||= {hsd:0,ms:0,revenue:0,ledgerFuel:0,days:0,manual:0};
+    item.hsd+=Number(row.hsd_liters)||0;item.ms+=Number(row.ms_liters)||0;
+    item.revenue+=Number(row.fuel_revenue)||0;item.days++;
+    const book=ledgerByDate()[row.date];
+    if(book){item.ledgerFuel+=Number(book.hsd_income||0)+Number(book.ms_income||0);item.manual++;}
+  }
+  el.innerHTML=Object.entries(months).map(([month,item])=>`<tr><td>${month}</td><td>${fmtL(item.hsd)}</td><td>${fmtL(item.ms)}</td><td>${fmtR(item.revenue)}</td><td>${fmtR(item.ledgerFuel)}</td><td>${item.manual===item.days?fmtR(item.ledgerFuel-item.revenue):'Incomplete manager inputs'}</td><td>${item.manual}/${item.days} days</td></tr>`).join('');
+  return;
+  {
   if (!nozzleReceipts.length || !ledger.length) { el.innerHTML = '<tr><td colspan="7" class="loading">No data</td></tr>'; return; }
 
   // Totalizer readings per date per nozzle
@@ -832,6 +899,7 @@ function renderMonthlyVerify() {
   el.innerHTML = html;
 }
 
+}
 function renderLineItems(present, start, end) {
   // Credits for the period — given (udhar) vs received back
   const cIn = {}, cOut = {};
@@ -839,8 +907,8 @@ function renderLineItems(present, start, end) {
     if (r.date < start || r.date > end) return;
     const amt = Number(r.amount) || 0;
     const key = r.party_name || '?';
-    if (r.type === 'credit') cIn[key] = (cIn[key] || 0) + amt;
-    else cOut[key] = (cOut[key] || 0) + amt;
+    if(financeModel.creditKind(r.type)==='given') cIn[key]=(cIn[key]||0)+amt;
+    else if(financeModel.creditKind(r.type)==='received') cOut[key]=(cOut[key]||0)+amt;
   });
   const cKeys = Object.keys(cIn).concat(Object.keys(cOut)).filter((v, i, arr) => arr.indexOf(v) === i);
   let cTotal = 0, cRecv = 0;
@@ -849,11 +917,13 @@ function renderLineItems(present, start, end) {
   cKeys.forEach(k => {
     const given = cIn[k] || 0, recv = cOut[k] || 0;
     cTotal += given; cRecv += recv;
-    chtml += `<div class="line-item"><span class="desc">${k}</span><span class="amt">${recv ? '<span class="text-green">+'+fmtR(recv)+'</span> ' : ''}${given ? '<span class="text-red">'+fmtR(given)+'</span>' : ''}</span></div>`;
+    chtml += `<div class="line-item"><span class="desc">${financeModel.escapeHtml(k)}</span><span class="amt">${recv ? '<span class="text-green">received '+fmtR(recv)+'</span> ' : ''}${given ? '<span class="text-red">given '+fmtR(given)+'</span>' : ''}</span></div>`;
   });
   if (cKeys.length) chtml += `<div class="ledger-row total"><span class="label">Net Udhar (given &minus; received)</span><span class="amt ${cTotal - cRecv > 0 ? 'text-red' : 'text-green'}">${fmtR(cTotal - cRecv)}</span></div>`;
   document.getElementById('creditSub').textContent = present.length ? (period === 'day' ? fmtDate(start) : fmtDate(start) + ' \u2013 ' + fmtDate(end)) : '';
   document.getElementById('creditBody').innerHTML = chtml;
+  const recorded=customerBalances.filter(row=>cKeys.includes(row.party_name));
+  for(const customer of recorded) document.getElementById('creditBody').innerHTML+=`<div class="card-sub">${financeModel.escapeHtml(customer.party_name)}: ${customer.verified_outstanding==null?'Outstanding unknown — opening balance unverified':fmtR(customer.verified_outstanding)+' outstanding'}; last repayment ${fmtDate(customer.last_repayment_date)}.</div>`;
 
   // Expenses grouped by BIN (with per-category detail)
   const eAgg = {};        // bin → { total, items: {category: amt} }
@@ -873,7 +943,7 @@ function renderLineItems(present, start, end) {
     etotal += b.total;
     ehtml += `<div class="bin-header">${bin} <span style="float:right">${fmtR(b.total)}</span></div>`;
     Object.entries(b.items).sort((a, b2) => b2[1] - a[1]).forEach(([cat, amt]) => {
-      ehtml += `<div class="line-item"><span class="desc">${cat}</span><span class="amt">${fmtR(amt)}</span></div>`;
+      ehtml += `<div class="line-item"><span class="desc">${financeModel.escapeHtml(cat)}</span><span class="amt">${fmtR(amt)}</span></div>`;
     });
   });
   if (bins.length) ehtml += `<div class="ledger-row total"><span class="label">Total Expenses</span><span class="amt">${fmtR(etotal)}</span></div>`;
@@ -892,9 +962,9 @@ function renderDataSources() {
 
   const sources = [
     { name: 'HDFC bank statement', rows: bankAll.length, first: firstOf(bankAll), last: lastOf(bankAll), limit: 14, note: 'manual export' },
-    { name: 'IOCL PAD ledger', rows: padData ? padData.length : 0, first: padData && padData.length ? padData[0].date : null, last: padData && padData.length ? lastOf([...padData].sort((a, b) => a.date < b.date ? -1 : 1)) : null, limit: 3, note: 'bookmarklet / manual' },
+    { name: 'IOCL supplier ledger', rows: padData ? padData.length : 0, first: padData?.[0]?.date, last: padData?.at(-1)?.date, limit: 30, note: 'full statement; balance-chain verified' },
     { name: 'Tanker invoices (SDMS)', rows: invoiceDates.length, first: firstOf(invoiceDates), last: lastOf(invoiceDates), limit: 14, note: 'priced &amp; verified vs PAD' },
-    { name: 'IRAS sales (shift totals)', rows: shiftTotals.length, first: shiftTotals.length ? [...shiftTotals].sort((a, b) => (a.shift_date || '') < (b.shift_date || '') ? -1 : 1)[0].shift_date : null, last: shiftTotals.length ? [...shiftTotals].sort((a, b) => (a.shift_date || '') > (b.shift_date || '') ? -1 : 1)[0].shift_date : null, limit: 2, note: 'daily 9AM→9AM' },
+    { name: 'IRAS calendar sales', rows: calendarSales.length, first: calendarSales[0]?.date, last: calendarSales.at(-1)?.date, limit: 2, note: 'IST midnight-to-midnight; matching revenue and cost population' },
     { name: 'OCR hisaab (daily ledger)', rows: ledger.length, first: ledger.length ? ledger[0].date : null, last: ledger.length ? ledger[ledger.length - 1].date : null, limit: 7, note: 'manual OCR entry' },
     { name: 'Settlements (PhonePe/CC)', rows: settlements.length, first: firstOf(settlements), last: lastOf(settlements), limit: 4, note: 'statement-derived' },
     { name: 'Register offloads', rows: registerDates.length, first: firstOf(registerDates), last: lastOf(registerDates), limit: 30, note: 'physical register pages' },
@@ -926,12 +996,14 @@ function renderIoclVerify() {
   const paid = {}, billed = {};
   bankIocl.forEach(t => { const m = (t.date || '').slice(0, 7); if (m) paid[m] = (paid[m] || 0) + Number(t.withdrawal || 0); });
   (padData || []).forEach(t => {
-    if (t.type !== 'DEBIT' || !/^Product Supply Invoice/.test(t.description || '')) return;
+    if(t.category!=='fuel_invoice') return;
     const m = (t.date || '').slice(0, 7);
-    if (m) billed[m] = (billed[m] || 0) + Number(t.amount || 0);
+    if(m) billed[m]=(billed[m]||0)+Number(t.debit||0);
   });
   // months from the earliest data point to now
-  const months = [...new Set([...Object.keys(paid), ...Object.keys(billed)])].sort();
+  const commonStart=bankIocl[0]?.date?.slice(0,7);
+  const commonEnd=bankIocl.at(-1)?.date?.slice(0,7);
+  const months=[...new Set([...Object.keys(paid),...Object.keys(billed)])].sort().filter(month=>commonStart && month>=commonStart && month<=commonEnd && Object.hasOwn(billed,month));
   if (!months.length) { el.parentElement.innerHTML = '<div class="loading">No IOCL payment/invoice data yet</div>'; return; }
   const labels = months.map(m => m.slice(5) + '/' + m.slice(0, 4));
   const paidArr = months.map(m => Math.round(paid[m] || 0));
@@ -1018,13 +1090,11 @@ function renderTrend(present, start, end) {  const L = ledgerByDate();
 
 // ---------- CSV export ----------
 function csvEscape(v) {
-  if (v == null) return '';
-  const s = String(v);
-  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  return financeModel.csvCell(v);
 }
 
 // Round to 2dp — raw floats (393605.6699999999) look broken in Excel.
-const money = n => Math.round((Number(n) || 0) * 100) / 100;
+const money = n => n==null?'':Math.round((Number(n)||0)*100)/100;
 
 function downloadCsv(filename, rows) {
   const csv = rows.map(r => r.map(csvEscape).join(',')).join('\r\n');
@@ -1045,22 +1115,23 @@ function periodDates() {
 // P&L section — 2 fixed columns. Labels never start with +/-/= so Excel
 // doesn't try to parse them as formulas.
 function pnlRows(a) {
-  const gross = a.income + a.ioclMargin - a.cogs;
-  const net = gross - a.exp - a.ioclFees;
+  const {gross,net}=financeModel.pnlEstimate(a);
   return [
-    ['PROFIT & LOSS'],
+    ['CALENDAR-DAY OPERATING ESTIMATE'],
+    ['Reporting basis','IST midnight-to-midnight; transaction-price cost estimate'],
+    ['Inputs complete',a.complete?'yes':'no — net estimate unavailable'],
     ['HSD Sales', money(a.hsd)],
     ['MS Sales', money(a.ms)],
     ['Other Income (lube sales)', money(a.other)],
     ['Total Income (IRAS revenue + lube)', money(a.income)],
     ['IOCL Dealer Margin (YVR464)', money(a.ioclMargin)],
-    ['COGS', money(a.cogs)],
+    ['Estimated fuel cost',a.cogs==null?'':money(a.cogs)],
     ['  COGS HSD liters', money(a.hsdL)],
     ['  COGS MS liters', money(a.msL)],
     ['Gross Margin', money(gross)],
     ['Total Expenses (Kharcha)', money(a.exp)],
     ['IOCL Fees & Interest', money(a.ioclFees)],
-    ['Net Profit (P&L)', money(net)],
+    ['Operating estimate',net==null?'':money(net)],
   ];
 }
 
@@ -1091,8 +1162,7 @@ function dailyRows(dates, L) {
     'Opening Cash', 'Closing Cash', 'IRAS Revenue (HSD+MS)', 'Lube Sales', 'Net (P&L)',
   ]];
   dates.forEach(d => {
-    const r = L[d];
-    if (!r) return;
+    const r=L[d]||{};
     const cg = cogsForDay(d);
     const st = shiftTotals.find(x => x.shift_date === d);
     const hasSt = st && (st.hsd_income != null || st.ms_income != null);
@@ -1103,7 +1173,12 @@ function dailyRows(dates, L) {
     const hasCogs = cg && (cg.hsd_l + cg.ms_l) > 0;
     const cogs = hasCogs ? cg.total : 0;
     const exp = r.total_expenses || 0;
-    const net = hasSt && hasCogs ? hsdRev + msRev + lube - cogs - exp : null;
+    const entries=(padData||[]).filter(entry=>entry.date===d);
+    const supplierMargin=entries.filter(entry=>entry.category==='dealer_margin').reduce((sum,entry)=>sum+Number(entry.credit),0);
+    const supplierFees=entries.filter(entry=>entry.category==='fee').reduce((sum,entry)=>sum+Number(entry.debit),0);
+    const covered=supplierStatements.some(row=>row.period_start<=d && row.period_end>=d && row.complete && row.verified_chain);
+    const full=calendarSales.find(row=>row.date===d)?.captured_full_window;
+    const net=hasSt && cg && L[d] && covered && full?hsdRev+msRev+lube+supplierMargin-cogs-exp-supplierFees:null;
     rows.push([
       d,
       money(r.hsd_income), money(r.ms_income),
@@ -1119,10 +1194,10 @@ function dailyRows(dates, L) {
 }
 
 function creditsRows(from, to) {
-  const rows = [['Date', 'Party', 'Type', 'Amount']];
+  const rows = [['Date', 'Party', 'Meaning', 'Amount','Source','Reference']];
   credits
     .filter(c => (!from || c.date >= from) && (!to || c.date <= to))
-    .forEach(c => rows.push([c.date, c.party_name, c.type, money(c.amount)]));
+    .forEach(c=>rows.push([c.date,c.party_name,financeModel.creditKind(c.type),money(c.amount),c.source,c.ref_no]));
   return rows;
 }
 
@@ -1139,7 +1214,7 @@ function exportCsv() {
   const scope = document.getElementById('exportScope').value;
   const tag = iso(new Date()).replace(/-/g, '');
   const L = ledgerByDate();
-  const allDates = [...new Set(ledger.map(r => r.date))].sort();
+  const allDates=[...new Set([...ledger.map(row=>row.date),...calendarSales.map(row=>row.date)])].sort();
 
   if (scope === 'credits') { downloadCsv(`credits_all_${tag}.csv`, creditsRows(null, null)); return; }
   if (scope === 'expenses') { downloadCsv(`expenses_all_${tag}.csv`, expensesRows(null, null)); return; }
