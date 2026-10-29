@@ -38,5 +38,41 @@ export function csvCell(value) {
 
 export function pnlEstimate(a) {
   const gross=a.cogs==null?null:a.revenue+a.ioclMargin-a.cogs;
-  return {gross,net:a.complete && gross!=null?gross-a.exp-a.ioclFees:null};
+  return {gross,net:a.estimate?a.estimate.net:null};
+}
+
+const MONTH_NAME=/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?![a-z])/i;
+const MONTHS=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+
+// The month a YVR464 dealer-margin credit pays for. Narrations vary ("YVR464 1102 Jun 24",
+// "DEALER MARGIN SEP'26", "Dealer margin for January,20" cut short at the source), so read only the
+// month name and take its latest occurrence at or before the posting date: a credit never posts
+// before its month. Without a month name, the posting month is used.
+export function marginMonth(description, postedOn) {
+  const match=MONTH_NAME.exec(description||'');
+  if(!match) return postedOn.slice(0,7);
+  const month=MONTHS.indexOf(match[1].slice(0,3).toLowerCase())+1;
+  const year=Number(postedOn.slice(0,4))-(month<=Number(postedOn.slice(5,7))?0:1);
+  return `${year}-${String(month).padStart(2,'0')}`;
+}
+
+// A day's operating estimate needs every sale captured, valid prices and the IOCL statement; its
+// kharcha turns that into a full net. Without kharcha the day still gives a before-kharcha estimate.
+export function dayKind({sales,prices,iocl,kharcha}) {
+  if(!sales || !prices || !iocl) return 'incomplete';
+  return kharcha?'complete':'before_kharcha';
+}
+
+// Net over a period's complete days, and a before-kharcha estimate over the days that lack only
+// kharcha. A whole-month view adds that month's YVR464 credit, shared by litres (margin.litres is the
+// month's total), so a month with missing days only gets their share.
+export function periodEstimate(days, margin) {
+  const total=(list,key)=>list.reduce((sum,day)=>sum+(Number(day[key])||0),0);
+  const share=list=>margin && margin.litres>0?margin.credit*total(list,'litres')/margin.litres:0;
+  const operating=list=>total(list,'revenue')-total(list,'cogs')-total(list,'fees')+share(list);
+  const complete=days.filter(day=>day.kind==='complete'), before=days.filter(day=>day.kind==='before_kharcha');
+  return {completeDays:complete.length,beforeKharchaDays:before.length,
+    net:complete.length?operating(complete)-total(complete,'exp'):null,
+    beforeKharcha:before.length?operating(before):null,
+    marginShare:share(complete)+share(before)};
 }
