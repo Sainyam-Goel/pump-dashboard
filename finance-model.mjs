@@ -91,3 +91,20 @@ export function kharchaCategory(row, cats) {
   const rule = cats.kharcha.rules.find(r => !r.pattern || new RegExp(r.pattern, 'i').test(row.category || ''));
   return rule ? rule.category : cats.kharcha.fallback;
 }
+
+// The cash flow as the hisaab page writes it (sql/028): opening + fuel sales + udhar paid back in cash + other cash in,
+// less PhonePe, card, bank deposit, cash picked, udhar given, kharcha and other cash out, is the closing cash. It holds
+// to the rupee on 208 of 210 days since 1 Apr 2026 (the other two are pages whose own sums fail).
+export function expectedClosing(a) {
+  return a.opening+a.ledgerInc+a.cashRepaid+a.otherIn-a.pp-a.hdfc-a.bank-a.picked-a.credit-a.exp-a.otherOut;
+}
+
+// Days whose opening cash isn't the previous ledger day's closing: where a period's cash flow stops adding up.
+export function cashBreaks(rows) {
+  const breaks=[];
+  for(let i=1;i<rows.length;i++){
+    const jump=(Number(rows[i].yesterday_cash)||0)-(Number(rows[i-1].total_cash)||0);
+    if(Math.abs(jump)>1) breaks.push({date:rows[i].date,previous:rows[i-1].date,jump});
+  }
+  return breaks;
+}

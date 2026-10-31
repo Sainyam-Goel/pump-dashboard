@@ -285,7 +285,6 @@ let calendarSales=[];
 let supplierAccounts=[];
 let supplierStatements=[];
 let digitalSales=[];
-let digitalSettlements=[];
 let customerBalances=[];
 let dayLiters = {};     // { date: { ms_l, hsd_l } } — calendar-day liters from iras_transactions (matches daily_ledger income frame)
 let settlements = [];   // { date, source, amount, transactions }
@@ -339,26 +338,23 @@ async function rpc(name, body = {}) {
 async function loadAll() {
   try {
     await modelReady;
-    const [l, c, e, s, cc, fr, nr, lube, kc] = await Promise.all([
-      query('v_reported_daily_inputs', 'order=date.asc&select=date,hsd_income,ms_income,total_income,yesterday_cash,total_cash,phonepe,hdfc_card,bank_deposit,cash_picked,total_credit,total_expenses'),
+    const [l, c, e, s, lube, kc] = await Promise.all([
+      query('v_reported_daily_inputs', 'order=date.asc&select=date,hsd_income,ms_income,total_income,yesterday_cash,total_cash,phonepe,hdfc_card,bank_deposit,cash_picked,total_credit,total_expenses,cash_repayments,other_cash_in,other_cash_out,hisaab_fark'),
       query('v_credit_events', 'order=date.asc&select=date,party_name,type,amount,source,ref_no'),
       query('v_expense_events', 'order=date.asc&select=date,category,amount'),
       query('settlements', 'order=date.asc&select=date,source,amount,transactions'),
-      query('cc_transactions', 'order=date.asc&select=date,batch_no,transactions,gross_amount,msf,net_payable'),
-      query('fuel_rates', 'order=date.asc&select=date,petrol_rate,diesel_rate'),
-      query('nozzle_receipts', 'order=date.asc&select=date,nozzle_id,reading'),
       query('lubricant_sales', 'order=date.asc&select=date,product,quantity,amount'),
       fetch('categories.json').then(r => { if (!r.ok) throw new Error('categories.json: HTTP ' + r.status); return r.json(); }),
     ]);
-    ledger = l; credits = c; expenses = e; settlements = s; ccTxns = cc; fuelRates = fr; nozzleReceipts = nr; lubeSales = lube;
+    ledger = l; credits = c; expenses = e; settlements = s; lubeSales = lube;
     kharchaCats = kc;
     // Calendar-day liters from the daily_sales_liters RPC (server-side aggregation,
     // matches the daily_ledger income frame). NOTE: the 9AM→9AM shift RPC
     // (iss_shift_totals) bleeds into adjacent days and is NOT used for COGS.
-    [calendarSales,padData,supplierAccounts,supplierStatements,digitalSales,digitalSettlements,customerBalances]=await Promise.all([
+    [calendarSales,padData,supplierAccounts,supplierStatements,digitalSales,customerBalances]=await Promise.all([
       query('v_finance_sales_daily','order=date.asc'),query('supplier_ledger_entries','order=date.asc'),
       query('v_supplier_account','order=company_code'),query('v_supplier_statement_coverage','order=period_start.asc'),
-      query('v_digital_sales_daily','order=date.asc'),query('v_digital_settlements_daily','order=date.asc'),
+      query('v_digital_sales_daily','order=date.asc'),
       query('v_customer_balances','order=party_name')]);
     shiftTotals=calendarSales.map(row=>({...row,shift_date:row.date,hsd_income:row.hsd_revenue,ms_income:row.ms_revenue}));
     dayLiters=Object.fromEntries(calendarSales.map(row=>[row.date,{ms_l:Number(row.ms_liters)||0,hsd_l:Number(row.hsd_liters)||0}]));
@@ -488,7 +484,7 @@ function agg(present) {
   const L = ledgerByDate();
   let hsd = 0, ms = 0, other = 0, ledgerInc = 0, exp = 0, credit = 0, pp = 0, hdfc = 0, bank = 0, picked = 0;
   let cogsTotal = 0, hsdL = 0, msL = 0;
-  let creditRepaid = 0, bankRepaid = 0;
+  let cashRepaid = 0, otherIn = 0, otherOut = 0, bankRepaid = 0;
   let ioclMargin = 0, ioclFees = 0;
   present.forEach(d => {
     const r = L[d];
@@ -497,6 +493,7 @@ function agg(present) {
       ledgerInc += r.total_income || 0;
       exp += r.total_expenses || 0; credit += r.total_credit || 0;
       pp += r.phonepe || 0; hdfc += r.hdfc_card || 0; bank += r.bank_deposit || 0; picked += r.cash_picked || 0;
+      cashRepaid += r.cash_repayments || 0; otherIn += r.other_cash_in || 0; otherOut += r.other_cash_out || 0;
     }
     // Calendar-day revenue and cost use the same classified transactions.
     // The OCR daily_ledger hsd_income/ms_income are unreliable (HSD/MS swapped or
@@ -508,15 +505,13 @@ function agg(present) {
     const cg = cogsForDay(d);
     if (cg) { cogsTotal += cg.total; hsdL += cg.hsd_l; msL += cg.ms_l; }
   });
-  // Udhar repayments in this period (credit_ledger). Khata semantics:
-  //   type='credit' / 'payment' = repayment RECEIVED; type='debit' = udhar GIVEN.
-  //   source='bank_statement' = repaid direct to HDFC bank (not through the cash box).
+  // Udhar repaid straight into HDFC or the co-op account (credit_ledger) never passes through the cash box; the cash
+  // repayments come from the page's cash flow (cash_repayments). type='credit' / 'payment' = repayment RECEIVED.
   const { start, end } = periodRange();
   credits.forEach(c => {
     if (c.date < start || c.date > end) return;
     if (c.type !== 'credit' && c.type !== 'payment') return;
-    if (c.source === 'bank_statement') bankRepaid += Number(c.amount) || 0;
-    else creditRepaid += Number(c.amount) || 0;
+    if (c.source === 'bank_statement' || c.source === 'coop_statement') bankRepaid += Number(c.amount) || 0;
   });
   // OTHER INCOME = REAL lube sales only (lubricant_sales table).
   lubeSales.forEach(x => { if (x.date >= start && x.date <= end) other += Number(x.amount) || 0; });
@@ -534,14 +529,12 @@ function agg(present) {
          financeModel.marginMonth(t.description,t.date)===start.slice(0,7)) ioclMargin+=Number(t.credit)||0;
     });
   }
-  // Residual = cash inflow per the hisaab beyond fuel revenue + lube. The hisaab is
-  // a CASH-FLOW statement — its income line includes udhar repayments (and any other
-  // cash received), which are NOT P&L revenue. Bank repayments never touch the cash
-  // box, so they're excluded here (shown as a separate info line in cash flow).
-  const nonFuelCashIn = Math.max(0, ledgerInc - hsd - ms - creditRepaid - other);
   const manual=present.filter(date=>L[date]);
   const opening=manual.length?L[manual[0]].yesterday_cash:null;
   const closing=manual.length?L[manual.at(-1)].total_cash:null;
+  // हिसाब फर्क on the period's last page: cash missing against the book (its written sign isn't reliable)
+  const fark=manual.length?Math.abs(Number(L[manual.at(-1)].hisaab_fark)||0):0;
+  const breaks=financeModel.cashBreaks(manual.map(date=>L[date]));
   const requested=daysInRange(start,end);
   // The operating estimate counts complete days, and days that lack only kharcha separately.
   const facts=requested.map(date=>dayFacts(date,L));
@@ -551,7 +544,7 @@ function agg(present) {
   const complete=facts.every(day=>day.kind==='complete');
   const revenue = hsd + ms + other;
   if(present.some(date=>!cogsForDay(date))) cogsTotal=null;
-  return { hsd, ms, other, nonFuelCashIn, creditRepaid, bankRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL, ioclMargin, ioclFees,complete,estimate,missing:facts.filter(day=>day.kind!=='complete'),manualDays:manual.length,requestedDays:requested.length };
+  return { hsd, ms, other, cashRepaid, otherIn, otherOut, fark, breaks, bankRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL, ioclMargin, ioclFees,complete,estimate,missing:facts.filter(day=>day.kind!=='complete'),manualDays:manual.length,requestedDays:requested.length };
 }
 
 function renderSummary(present) {
@@ -617,40 +610,39 @@ function renderPnl(present) {
   html += `<div class="card-sub">Counted days only: sales &minus; fuel cost &minus; IOCL fees${period==='month'?' + YVR464 dealer margin':''} &minus; kharcha.${period==='month'?'':' YVR464 is booked to whole months.'}</div>`;
   if (notCounted.length) html += `<div class="warn">Not counted: ${notCounted.slice(0,8).map(day=>`${fmtDate(day.date)} (${day.reason})`).join(' &middot; ')}${notCounted.length>8?` &middot; +${notCounted.length-8} more`:''}</div>`;
 
-  if (a.nonFuelCashIn > 500) {
-    html += `<div class="warn">\u2139\uFE0F Cash-in exceeds fuel revenue by ${fmtR(a.nonFuelCashIn)} — cash udhar repayments (${fmtR(a.creditRepaid)} logged) or OCR overstatement. Bank repayments go direct to HDFC.</div>`;
-  }
   el.innerHTML = html;
 }
 
 function renderCashFlow(present) {
   const a = agg(present);
   if(!a.manualDays){document.getElementById('cfBody').innerHTML='<div class="warn">No manager cash close entered for this period. Cash is unknown.</div>';return;}
-  // Udhar received back during the period (credit_ledger type=credit/payment).
-  // The ledger's total_income already INCLUDES the CASH repayments (OCR counts
-  // them as income), so we subtract them from ledger income, then show them as
-  // their own line. Bank repayments (source=bank_statement) never entered the
-  // cash box — shown as info only, excluded from the recon math.
+  // The page's own cash flow (sql/028). Udhar repaid into HDFC or the co-op is shown as info, outside the sum.
   const el = document.getElementById('cfBody');
-  const cfIncome = a.ledgerInc - a.creditRepaid;
-  const expected = a.opening + cfIncome + a.creditRepaid - a.pp - a.hdfc - a.bank - a.picked - a.credit - a.exp;
+  const expected = financeModel.expectedClosing(a);
   const diff = Math.round((expected - a.closing) * 100) / 100;
   let html = `
     <div class="ledger-row"><span class="label">Opening Cash</span><span class="amt">${fmtR(a.opening)}</span></div>
-    <div class="ledger-row"><span class="label">+ Income (ledger, excl. repayments)</span><span class="amt text-green">+${fmtR(cfIncome)}</span></div>
-    <div class="ledger-row"><span class="label">+ Udhar Received Back (cash)</span><span class="amt text-green">+${fmtR(a.creditRepaid)}</span></div>
+    <div class="ledger-row"><span class="label">+ Fuel Sales (HSD + MS, ledger)</span><span class="amt text-green">+${fmtR(a.ledgerInc)}</span></div>
+    <div class="ledger-row"><span class="label">+ Udhar Received Back (cash)</span><span class="amt text-green">+${fmtR(a.cashRepaid)}</span></div>
+    <div class="ledger-row"><span class="label">+ Other Cash In</span><span class="amt text-green">+${fmtR(a.otherIn)}</span></div>
     <div class="ledger-row"><span class="label">&minus; PhonePe Settlement</span><span class="amt text-red">&minus;${fmtR(a.pp)}</span></div>
     <div class="ledger-row"><span class="label">&minus; HDFC / Card Settlement</span><span class="amt text-red">&minus;${fmtR(a.hdfc)}</span></div>
     <div class="ledger-row"><span class="label">&minus; Bank Deposit</span><span class="amt text-red">&minus;${fmtR(a.bank)}</span></div>
     <div class="ledger-row"><span class="label">&minus; Cash Picked</span><span class="amt text-red">&minus;${fmtR(a.picked)}</span></div>
     <div class="ledger-row"><span class="label">&minus; Credits Given (Udhar)</span><span class="amt text-red">&minus;${fmtR(a.credit)}</span></div>
     <div class="ledger-row"><span class="label">&minus; Expenses (Kharcha)</span><span class="amt text-red">&minus;${fmtR(a.exp)}</span></div>
+    <div class="ledger-row"><span class="label">&minus; Other Cash Out</span><span class="amt text-red">&minus;${fmtR(a.otherOut)}</span></div>
     <div class="ledger-row total cashflow-closing"><span class="label">Closing Cash</span><span class="amt">${fmtR(a.closing)}</span></div>`;
+  if (a.fark) {
+    html += `<div class="warn">\u26A0\uFE0F Cash missing against the book (हिसाब फर्क): ${fmtR(a.fark)} &mdash; cash in hand ${fmtR(a.closing - a.fark)}</div>`;
+  }
   if (a.bankRepaid > 0) {
-    html += `<div class="warn">\u2139\uFE0F Udhar repaid via bank (direct to HDFC, not in cash box): ${fmtR(a.bankRepaid)}</div>`;
+    html += `<div class="warn">\u2139\uFE0F Udhar repaid into HDFC or the co-op (not through the cash box): ${fmtR(a.bankRepaid)}</div>`;
   }
   if (Math.abs(diff) > 2) {
-    html += `<div class="warn">\u26A0\uFE0F Recon gap: closing should be ${fmtR(expected)} (${fmtR(diff)} difference &mdash; missing days or data errors)</div>`;
+    const why = a.breaks.length ? 'opening cash differs from the day before on ' + a.breaks.slice(0, 3).map(b =>
+      `<a href="hisaab.html#${b.date}">${fmtDate(b.date)}</a> (${b.jump > 0 ? '+' : ''}${fmtR(b.jump)})`).join(', ') : 'missing days or data errors';
+    html += `<div class="warn">\u26A0\uFE0F Recon gap: closing should be ${fmtR(expected)} (${fmtR(diff)} difference &mdash; ${why})</div>`;
   }
   el.innerHTML = html;
 }
@@ -1121,20 +1113,24 @@ function pnlRows(a) {
 }
 
 function cashFlowRows(a) {
-  const recon = money(a.opening + a.ledgerInc - a.pp - a.hdfc - a.bank - a.picked - a.credit - a.exp - a.closing);
+  if (!a.manualDays) return [['CASH FLOW'], ['Cash unknown: no ledger day in this period']];
+  const recon = money(financeModel.expectedClosing(a) - a.closing);
   return [
     ['CASH FLOW'],
     ['Opening Cash', money(a.opening)],
-    ['Add: Income (ledger, excl. repayments)', money(a.ledgerInc - a.creditRepaid)],
-    ['Add: Udhar Received Back (cash)', money(a.creditRepaid)],
-    ...(a.bankRepaid > 0 ? [['  (Udhar repaid via bank — direct to HDFC)', money(a.bankRepaid)]] : []),
+    ['Add: Fuel Sales (HSD + MS, ledger)', money(a.ledgerInc)],
+    ['Add: Udhar Received Back (cash)', money(a.cashRepaid)],
+    ['Add: Other Cash In', money(a.otherIn)],
+    ...(a.bankRepaid > 0 ? [['  (Udhar repaid into HDFC or the co-op, not through the cash box)', money(a.bankRepaid)]] : []),
     ['Less: PhonePe Settlement', money(a.pp)],
     ['Less: HDFC / Card Settlement', money(a.hdfc)],
     ['Less: Bank Deposit', money(a.bank)],
     ['Less: Cash Picked', money(a.picked)],
     ['Less: Credits Given (Udhar)', money(a.credit)],
     ['Less: Expenses (Kharcha)', money(a.exp)],
+    ['Less: Other Cash Out', money(a.otherOut)],
     ['Closing Cash', money(a.closing)],
+    ...(a.fark ? [['Cash missing against the book (हिसाब फर्क)', money(a.fark)], ['Cash in hand', money(a.closing - a.fark)]] : []),
     ['Recon Gap', recon],
   ];
 }
