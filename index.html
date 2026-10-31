@@ -979,12 +979,7 @@ function renderChart(period) {
 async function loadAll() {
   loadErrors.length = 0;
   shiftSummaryPromise=null;shiftSummaryDate=null;
-  let operations=document.getElementById('operationsCenter');
-  if(!operations){operations=document.createElement('div');operations.id='operationsCenter';
-    const content=document.getElementById('loadErrors');content.insertAdjacentElement('afterend',operations);}
   await Promise.all([
-    safe('operational actions',async()=>{const module=await import('./operations-ui.mjs');
-      await module.loadOperations(SUPABASE_URL,HEADERS,operations);}),
     safe('sales', loadSales),
     safe('cash/credits', loadCashCredits),
     safe('fuel rate', loadFuelRate),
