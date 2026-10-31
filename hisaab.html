@@ -1,0 +1,847 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hisaab Pages</title>
+<style>
+:root {
+  --bg: #eceef1; --panel: #fff; --ink: #1f2328; --muted: #6a737d; --line: #dde1e6; --soft: #f6f8fa;
+  --blue: #1a73e8; --red: #d93025; --orange: #e8710a; --green: #188038; --amber: #a86b00; --sel: #7c3aed;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { display: flex; flex-direction: column; background: var(--bg); color: var(--ink);
+  font: 13.5px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "Kohinoor Devanagari", "Noto Sans Devanagari", sans-serif; }
+button, select, input, textarea { font: inherit; color: inherit; }
+button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+button:hover { background: var(--soft); }
+header { display: flex; align-items: center; gap: 8px; padding: 7px 12px; background: var(--panel);
+  border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+header select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); min-width: 210px; }
+header label { display: flex; align-items: center; gap: 5px; color: var(--muted); }
+.spacer { flex: 1; }
+.legend { display: flex; gap: 10px; color: var(--muted); font-size: 12px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 13px; height: 9px; border: 2px solid; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.muted { color: var(--muted); }
+#saveState { font-size: 12px; min-width: 60px; }
+#saveState.bad { color: var(--red); }
+main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(420px, 1fr); position: relative; }
+#photoPane { overflow: auto; position: relative; }
+#stage { position: relative; width: 100%; margin: 0 auto; }
+#photo { display: block; width: 100%; user-select: none; -webkit-user-drag: none; }
+#overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+#overlay rect { fill: rgba(26, 115, 232, .05); stroke: var(--blue); stroke-width: 1.5; vector-effect: non-scaling-stroke;
+  cursor: pointer; pointer-events: all; }
+#overlay rect.s-note, #overlay rect.s-header { stroke: #8a929b; stroke-dasharray: 4 3; fill: transparent; }
+#overlay rect.verified { stroke: var(--green); fill: rgba(24, 128, 56, .06); }
+#overlay rect.differs { stroke: var(--orange); fill: rgba(232, 113, 10, .10); stroke-width: 2; }
+#overlay rect.fail { stroke: var(--red); fill: rgba(217, 48, 37, .10); stroke-width: 2; }
+#overlay rect.hot { fill: rgba(124, 58, 237, .16); stroke: var(--sel); stroke-width: 2.5; }
+#overlay rect.sel { fill: rgba(124, 58, 237, .22); stroke: var(--sel); stroke-width: 3.5; stroke-dasharray: none; }
+#side { overflow: auto; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; }
+#content { padding: 12px 14px 10px; flex: 1; }
+h2 { font-size: 17px; margin: 0; }
+h3 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 16px 0 6px; font-weight: 600; }
+.meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.box { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 10px; background: var(--soft); }
+.btitle { font-weight: 600; margin-bottom: 3px; }
+.item { padding: 2px 4px; border-radius: 4px; cursor: pointer; }
+.item:hover, .item.hot { background: #ede9fe; }
+.item.bad { color: var(--red); }
+.item .ic { display: inline-block; width: 12px; }
+.st-verified .ic, .st-verified.ic, .st-shifted .ic, .st-shifted.ic { color: var(--green); }
+.st-differs .ic, .st-differs.ic { color: var(--orange); }
+.st-close .ic, .st-close.ic { color: var(--amber); }
+.st-uncovered .ic, .st-uncovered.ic { color: var(--muted); }
+details summary { cursor: pointer; color: var(--green); padding: 2px 4px; }
+.explain { margin-top: 6px; font-size: 12.5px; color: #5c4400; background: #fff8e1; border-radius: 6px; padding: 6px 8px; }
+.other { font-size: 12.5px; color: #3d444d; margin: 4px 4px 0; }
+.pnote textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; background: #fff; resize: vertical; }
+.pnrow, .drow { display: flex; align-items: center; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.pnrow .muted, .drow .muted { margin-right: auto; font-size: 12px; }
+.rows { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.row { display: grid; grid-template-columns: 14px minmax(70px, auto) 1fr auto; gap: 8px; align-items: baseline;
+  padding: 4px 10px; border-top: 1px solid var(--line); cursor: pointer; }
+.row:first-child { border-top: 0; }
+.row .v { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+.row .w { color: #3d444d; overflow-wrap: anywhere; }
+.sg { color: var(--muted); text-align: center; }
+table.grid { border-collapse: separate; border-spacing: 0; width: 100%; border: 1px solid var(--line); border-radius: 8px;
+  overflow: hidden; margin-bottom: 6px; }
+.grid th { font-size: 11.5px; color: var(--muted); font-weight: 600; text-align: right; padding: 4px 8px; background: var(--soft); }
+.grid tbody th { text-align: left; border-top: 1px solid var(--line); }
+.grid td { text-align: right; padding: 4px 8px; border-top: 1px solid var(--line); cursor: pointer; font-variant-numeric: tabular-nums; }
+.cell .cv { font-weight: 600; }
+.row:hover, .cell:hover { background: #f5f2ff; }
+.row.hot, .cell.hot { background: #ede9fe; }
+.row.sel, .cell.sel { background: #e4dcff; box-shadow: inset 3px 0 0 var(--sel); }
+.row.fail .v, .cell.fail .cv { color: var(--red); }
+.row.differs .v, .cell.differs .cv { color: var(--orange); }
+.mk { white-space: nowrap; }
+.m { display: inline-block; margin-left: 5px; font-size: 12px; }
+.m.good { color: var(--green); }
+.m.bad { color: var(--red); font-weight: 700; }
+.m.words { background: #fff3bf; border-radius: 3px; padding: 0 3px; font-size: 10.5px; color: #7a5d00; }
+.m.nobox { color: var(--muted); }
+.pill { margin-left: 6px; font-size: 11px; padding: 0 6px; border-radius: 10px; }
+.p-to_check { background: #fff3bf; color: #7a5d00; }
+.p-ok { background: #d3f9d8; color: #1b5e20; }
+.p-differs { background: #ffe3e3; color: #a51111; }
+#detail { position: sticky; bottom: 0; background: #fbfaff; border-top: 2px solid var(--sel); padding: 9px 14px 10px;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, .06); }
+.dempty { color: var(--muted); font-size: 12.5px; }
+.dhead { display: flex; align-items: center; gap: 8px; }
+.dval { font-size: 15px; font-weight: 600; margin: 3px 0 5px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.facts { font-size: 12.5px; display: grid; gap: 2px; max-height: 120px; overflow: auto; }
+.facts .bad { color: var(--red); }
+.facts .good { color: var(--green); }
+.review { display: grid; gap: 6px; margin-top: 8px; }
+.seg { display: flex; gap: 6px; }
+.seg button.on { border-color: transparent; font-weight: 600; }
+.review input, .review textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; background: #fff; resize: vertical; }
+button.primary { background: var(--sel); color: #fff; border-color: var(--sel); }
+button.primary:hover { background: #6d28d9; }
+.err { background: #ffe3e3; color: #a51111; padding: 8px 12px; }
+#months, #inbox { position: absolute; inset: 0; z-index: 5; background: var(--panel); overflow: auto; padding: 14px 18px; }
+.drop { border: 2px dashed var(--line); border-radius: 10px; padding: 12px 14px; background: var(--soft); max-width: 780px; display: grid; gap: 8px; justify-items: start; }
+.drop.over { border-color: var(--sel); background: #f5f2ff; }
+.kinds { display: flex; gap: 16px; flex-wrap: wrap; }
+.kinds label { display: flex; align-items: center; gap: 5px; }
+.pick { color: var(--sel); text-decoration: underline; cursor: pointer; }
+.job { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0; max-width: 780px; display: grid; gap: 6px; justify-items: start; }
+.job .jst { font-size: 11.5px; padding: 0 6px; border-radius: 10px; background: #f1f3f5; }
+.js-running .jst, .js-queued .jst { background: #e7f5ff; color: #1864ab; }
+.js-waiting .jst { background: #fff4e6; color: #d9480f; }
+.js-done .jst { background: #d3f9d8; color: #1b5e20; }
+.js-failed .jst { background: #ffe3e3; color: #a51111; }
+.job details { width: 100%; }
+.job pre { white-space: pre-wrap; font-size: 11.5px; background: var(--soft); padding: 6px 8px; border-radius: 6px; max-height: 220px; overflow: auto; margin: 2px 0 6px; }
+.job .bad { color: var(--red); }
+.jact { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.newpage { margin-top: 10px; background: #fff4e6; border: 1px solid #ffd8a8; border-radius: 8px; padding: 8px 10px; }
+.mhead { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.mtable { overflow-x: auto; }
+table.months { border-collapse: collapse; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.months th, table.months td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: right; vertical-align: top; }
+table.months thead th { font-size: 11.5px; color: var(--muted); font-weight: 600; background: var(--soft); }
+table.months tbody th, table.months tfoot th { text-align: left; }
+table.months tfoot th, table.months tfoot td { font-weight: 600; border-top: 2px solid var(--line); }
+table.months a { color: inherit; }
+td.warn { color: var(--orange); font-weight: 600; }
+td.okc { color: var(--green); }
+td.bad { color: var(--red); font-weight: 600; }
+td .sub { font-size: 11px; color: var(--muted); font-weight: 400; }
+.mfoot { font-size: 12px; max-width: 920px; line-height: 1.5; }
+.chip { font-size: 11px; padding: 0 6px; border-radius: 10px; margin-left: 6px; background: #eef2ff; color: #3730a3; white-space: nowrap; }
+.chip.auto { background: #f1f3f5; color: #57606a; }
+.fuel { font-size: 11px; font-weight: 600; margin-left: 6px; padding: 0 5px; border-radius: 4px; border: 1px solid transparent; }
+.fuel-hsd { background: #e7f5ff; color: #1864ab; }
+.fuel-ms { background: #fff4e6; color: #d9480f; }
+.fuel.guess { background: transparent; border-style: dashed; border-color: currentColor; }
+.catrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; margin-top: 6px; }
+.catrow select { border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; background: #fff; }
+.catrow label { display: flex; align-items: center; gap: 4px; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; grid-template-rows: 55vh 1fr; } }
+.login { margin: auto; display: grid; gap: 10px; width: min(340px, 92vw); text-align: center; }
+.login input { border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; background: #fff; }
+</style>
+</head>
+<body>
+<header>
+  <button id="prev" title="Previous page (←)">◀</button>
+  <select id="pick" aria-label="Page" title="❌ a sum fails or a source differs · ✅ nothing flagged · ✗ failed sums · ≠ sources that differ · ✎ your notes"></select>
+  <button id="next" title="Next page (→)">▶</button>
+  <label title="Only pages with a failed sum, a source that differs, or your notes"><input type="checkbox" id="only"> Only pages to look at</label>
+  <label title="Also list the pages from before the fiscal year starts on 1 April"><input type="checkbox" id="early"> Show Feb–Mar</label>
+  <button id="monthsBtn" title="Month summary">Months</button>
+  <button id="inboxBtn" title="Upload new hisaab photos and statements">Add files</button>
+  <span class="legend">
+    <span><i style="border-color: var(--red)"></i>sum fails</span>
+    <span><i style="border-color: var(--orange)"></i>differs from a source</span>
+    <span><i style="border-color: var(--green)"></i>matches a source</span>
+    <span><i style="border-color: var(--blue)"></i>other</span>
+  </span>
+  <span class="spacer"></span>
+  <span id="snap" class="muted"></span>
+  <button id="zoomOut" title="Zoom out (−)">−</button><span id="zoomLabel">100%</span><button id="zoomIn" title="Zoom in (+)">+</button>
+  <button id="fitWidth" title="Fit the width (0)">Width</button><button id="fitPage" title="Show the whole page">Page</button>
+  <span id="saveState" class="muted"></span>
+</header>
+<main>
+  <div id="photoPane"><div id="stage"><img id="photo" alt="Page photo"><svg id="overlay" viewBox="0 0 1000 1000" preserveAspectRatio="none"></svg></div></div>
+  <aside id="side"><div id="content"></div><div id="detail"></div></aside>
+  <section id="months" hidden></section>
+  <section id="inbox" hidden></section>
+</main>
+<script>
+const NS = 'http://www.w3.org/2000/svg';
+const FY_START = '2026-04-01';  // the fiscal year; earlier pages are listed only with "Show Feb–Mar"
+const S = { index: [], date: null, page: null, by: {}, order: [], sel: null, zoom: 1 };
+// hisaab.html on the dashboard (GitHub Pages) is this page as a read-only copy: it signs in by email link and reads
+// what the Mac viewer published to the private bucket (sql/027), which only an approved operator can read.
+const HOSTED = location.pathname.endsWith('/hisaab.html');
+const SUPABASE = 'https://zkomggcvakdocbgrglkn.supabase.co', BUCKET = 'hisaab-viewer';
+const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inprb21nZ2N2YWtkb2NiZ3JnbGtuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4NjI5MjIsImV4cCI6MjA5MDQzODkyMn0.Ma3NTFbjiLk4iFN7jgA3jXWT7m3di6gayD3svsnwQpc';
+let DB = null;
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const n = v => v == null ? '' : String(Math.round(v * 100) / 100);
+const inr = v => v == null ? '–' : (v < 0 ? '−' : '') + '₹' + Math.abs(v).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const val = (v, u) => v == null ? '–' : u === '₹' ? inr(v) : n(v) + (u ? ' ' + u : '');
+const diff = (v, u) => (v > 0 ? '+' : '') + val(v, u);
+const day = (d, long) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', long
+  ? { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' } : { weekday: 'short', day: 'numeric', month: 'short' });
+
+const SECTIONS = [['meter', 'Meters'], ['sales', 'Sales'], ['cash_flow', 'Cash flow'], ['check', 'Check block'],
+  ['udhar', 'Udhar · उधार'], ['jama', 'Jama · जमा'], ['kharcha', 'Kharcha · खर्चा'], ['phonepe', 'PhonePe'],
+  ['card', 'HDFC card'], ['stock', 'Stock'], ['note', 'Other writing']];
+const ITEM = { opening_cash: 'Opening cash', hsd_amount: 'HSD sale', ms_amount: 'MS sale', repayment: 'Repayment',
+  other_in: 'Other in', total: 'Total', phonepe: 'PhonePe', card: 'Card', bank_deposit: 'Bank deposit', udhar: 'Udhar',
+  kharcha: 'Kharcha', salary: 'Salary', cash_picked: 'Cash picked', other_out: 'Other out', closing_cash: 'Closing cash',
+  cash_in_hand: 'Cash in hand', fark: 'हिसाब फर्क', subtotal: 'Subtotal', commission: 'छूट (discount)', machine: 'Machine',
+  ms: 'MS', hsd1: 'HSD I', hsd2: 'HSD II', hsd_total: 'HSD total', today: 'Today', yesterday: 'Yesterday', diff: 'Difference',
+  liters_before_testing: 'Litres', testing_liters: 'Testing', sale_liters: 'Sale litres', rate: 'Rate', amount: 'Amount' };
+const SIGN = { '+': '+', '-': '−', '=': '=' };
+const ST = { verified: ['●', 'Matches'], shifted: ['●', 'Matches across neighbouring days'], differs: ['●', 'Differs'],
+  close: ['◐', 'Close: agrees by month'], uncovered: ['○', 'No data for this day'] };
+const shiftNote = s => s.run ? ` · the same money is a day apart: ${s.run.map(([d, x]) => `${day(d)} ${diff(x, s.unit)}`).join(', ')} net to zero` : '';
+const STATUS = { to_check: 'To check', ok: 'OK on paper', differs: 'Differs' };
+const CAT_BY = { rule: 'Category from the rules', label: 'Your category for every line written so', line: 'Your category for this line' };
+const FUEL_BY = { written: 'Written on the page', rate: 'Not written; worked out from the rate', default: 'Not written; HSD, as udhar usually is' };
+
+const kindOf = l => l.section === 'note' ? (l.item === 'stock_note' ? 'Stock note' : '')
+  : l.section === 'check' && l.item === 'other' ? 'Other' : l.item === 'entry' ? '' : (ITEM[l.item] ?? l.item ?? '');
+const statusClass = l => l.check === 'fail' ? 'fail' : l.source === 'differs' ? 'differs'
+  : l.source === 'verified' || l.source === 'shifted' ? 'verified' : '';
+const flagged = p => p.failed || p.differs || p.notes || p.new;
+const shown = p => p.date === S.date || ((p.date >= FY_START || $('#early').checked) && (!$('#only').checked || flagged(p)));
+
+function describe(l) {
+  const sec = (SECTIONS.find(s => s[0] === l.section) || [, l.section])[1];
+  if (l.section === 'meter') return `${l.meter} ${kindOf(l).toLowerCase()}: ${n(l.reading ?? l.liters)}${l.line_no > 10 ? ' (2nd table)' : ''}`;
+  if (l.section === 'sales') return `${l.fuel} ${kindOf(l).toLowerCase()}: ${n(l.item === 'rate' ? l.rate : l.item === 'amount' ? l.amount : l.liters)}`;
+  if (l.section === 'stock') return `Stock ${kindOf(l)}: dip ${n(l.reading)} · ${n(l.liters)} L`;
+  const bits = [SIGN[l.sign] ? SIGN[l.sign] + n(l.amount) : n(l.amount ?? l.reading), kindOf(l), l.label,
+    l.party && l.party !== l.label ? '→ ' + l.party : '', ['udhar', 'jama'].includes(l.section) ? l.fuel_shown || l.fuel : '',
+    l.liters != null && l.amount != null ? n(l.liters) + ' L' : '', l.note && l.note !== l.label ? l.note : ''];
+  return `${sec}: ${bits.filter(Boolean).join(' · ')}`;
+}
+
+async function getJSON(url, opts) {
+  if (HOSTED) return published(url);
+  const r = await fetch(url, opts);
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+async function published(url) {  // the viewer's own /api answers, as the Mac uploaded them
+  const path = { '/api/index': 'index.json', '/api/months': 'months.json' }[url] ||
+    (url.startsWith('/api/page?date=') ? `pages/${url.slice('/api/page?date='.length)}.json` : '');
+  if (!path) throw new Error('Not in the read-only copy: ' + url);
+  const { data, error } = await DB.storage.from(BUCKET).download(path);
+  if (error) throw error;
+  return JSON.parse(await data.text());
+}
+
+function showPhoto(d) {
+  if (!HOSTED) return void ($('#photo').src = '/photo/' + d + '.jpg');
+  URL.revokeObjectURL($('#photo').src);  // a blob fetched under the session: no link that works without the login
+  $('#photo').removeAttribute('src');
+  DB.storage.from(BUCKET).download(`photos/${d}.jpg`).then(({ data }) => {
+    if (data && S.date === d) $('#photo').src = URL.createObjectURL(data);
+  });
+}
+
+async function signIn() {
+  $('#inboxBtn').style.display = 'none';  // uploads, notes and categories stay on the Mac
+  $('#early').parentElement.style.display = 'none';  // the copy holds the pages from 1 Apr only (header labels are flex, so not .hidden)
+  const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2.118.0');
+  DB = createClient(SUPABASE, ANON_KEY);
+  const { data: { session } } = await DB.auth.getSession();
+  if (session && (await DB.rpc('is_pump_operator')).data === true) {
+    $('#saveState').insertAdjacentHTML('beforebegin', '<a href="./">Dashboard</a><a href="finance.html">Finance</a>' +
+      '<button id="signOut" title="Sign out on this device">Sign out</button>');
+    $('#signOut').onclick = () => DB.auth.signOut().then(() => location.reload());
+    return true;
+  }
+  document.body.innerHTML = '<div class="login"><h2>Hisaab pages</h2><p class="muted">Ledger photos and udhar entries, for ' +
+    'the pump\'s approved operator only.</p><input id="email" type="email" value="bansiwalafs@gmail.com" aria-label="Operator email">' +
+    '<button id="sendLink" class="primary">Email me a login link</button>' +
+    `<p id="loginMsg" role="status">${session ? 'This account is not an approved operator.' : ''}</p><a href="./">← Dashboard</a></div>`;
+  $('#sendLink').onclick = async () => {
+    try { localStorage.setItem('hisaab_want', location.hash.slice(1)); } catch {}  // the day the link asked for
+    const { error } = await DB.auth.signInWithOtp({ email: $('#email').value.trim(),
+      options: { shouldCreateUser: false, emailRedirectTo: location.origin + location.pathname } });
+    $('#loginMsg').textContent = error ? error.message : 'Login link sent. Open it on this device.';
+  };
+  return false;
+}
+
+function remembered() {
+  try { const d = localStorage.getItem('hisaab_want') || ''; localStorage.removeItem('hisaab_want'); return d; } catch { return ''; }
+}
+
+function optLabel(p) {
+  const f = [p.failed ? `✗${p.failed}` : '', p.differs ? `≠${p.differs}` : '', p.notes ? `✎${p.notes}` : ''].filter(Boolean).join(' ');
+  return `${p.failed || p.differs ? '❌' : '✅'}${p.new ? ' 🆕' : ''} ${day(p.date)}${f ? '   ' + f : ''}${p.boxed ? '' : '   · no boxes yet'}`;
+}
+
+function fillPicker() {
+  const months = {};
+  for (const p of S.index.filter(shown)) (months[p.date.slice(0, 7)] ||= []).push(p);
+  $('#pick').innerHTML = Object.entries(months).map(([m, ps]) =>
+    `<optgroup label="${new Date(m + '-01T00:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}">` +
+    ps.map(p => `<option value="${p.date}">${esc(optLabel(p))}</option>`).join('') + '</optgroup>').join('');
+  if (S.date) $('#pick').value = S.date;
+}
+
+async function loadIndex() {
+  const j = await getJSON('/api/index');
+  S.index = j.pages;
+  fillPicker();
+  const fy = j.pages.filter(p => p.date >= FY_START), unboxed = j.pages.filter(p => !p.boxed).length;
+  $('#snap').textContent = `❌ ${fy.filter(p => p.failed || p.differs).length} of ${fy.length} pages since 1 Apr` +
+    `${unboxed ? ` · ${unboxed} without boxes` : ''} · data from ${j.pulled.replace('T', ' ')}`;
+}
+
+async function openPage(d) {
+  const p = await getJSON('/api/page?date=' + d);
+  S.date = d; S.page = p; S.sel = null;
+  S.by = Object.fromEntries(p.lines.map(l => [l.place, l]));
+  history.replaceState(null, '', '#' + d);
+  $('#pick').value = d;
+  showPhoto(d);
+  drawBoxes();
+  renderSide();
+  renderDetail();
+  $('#photoPane').scrollTo(0, 0);
+  $('#side').scrollTo(0, 0);
+}
+
+function drawBoxes() {
+  const svg = $('#overlay');
+  svg.innerHTML = '';
+  for (const l of S.page.lines) {
+    if (!l.box) continue;
+    const [y0, x0, y1, x1] = l.box;
+    const r = document.createElementNS(NS, 'rect');
+    for (const [k, v] of Object.entries({ x: x0, y: y0, width: x1 - x0, height: y1 - y0 })) r.setAttribute(k, v);
+    r.dataset.place = l.place;
+    r.setAttribute('class', `s-${l.item === 'header' ? 'header' : l.section} ${statusClass(l)}`);
+    const t = document.createElementNS(NS, 'title');
+    t.textContent = describe(l);
+    r.appendChild(t);
+    svg.appendChild(r);
+  }
+}
+
+function marks(l) {
+  const out = [], nt = S.page.notes.lines?.[l.place];
+  if (l.check === 'ok') out.push(`<span class="m good" title="Adds up: ${esc(l.check_notes.join('; '))}">✓</span>`);
+  if (l.check === 'fail') out.push(`<span class="m bad" title="${esc(l.check_notes.join('; '))}">✗</span>`);
+  if (l.source) out.push(`<span class="m st-${l.source} ic" title="${ST[l.source][1]}: ${esc(l.sources.map(i => S.page.sources[i].name).join(', '))}">${ST[l.source][0]}</span>`);
+  if (l.resolution === 'photo') out.push(`<span class="m" title="Settled on the photo: ${esc(l.why || '')}">📷</span>`);
+  if (l.resolution === 'owner') out.push('<span class="m" title="Changed by you">✍</span>');
+  if (l.disputed?.length) out.push(`<span class="m words" title="The two models read the ${esc(l.disputed.join(', '))} differently">Aa</span>`);
+  if (nt?.status) out.push(`<span class="pill p-${nt.status}">${STATUS[nt.status]}</span>`);
+  if (nt?.note || nt?.paper) out.push(`<span class="m" title="${esc([nt.paper && 'Paper says: ' + nt.paper, nt.note].filter(Boolean).join(' · '))}">✎</span>`);
+  if (S.page.boxed && !l.box) out.push('<span class="m nobox" title="Not found on the photo">⌀</span>');
+  return `<span class="mk">${out.join('')}</span>`;
+}
+
+const cell = (l, v) => l ? `<td class="cell ${statusClass(l)}" data-place="${l.place}"><span class="cv">${v}</span>${marks(l)}</td>` : '<td></td>';
+
+function meterGrid(ls) {
+  const cols = ['HSD I', 'HSD II', 'MS I', 'MS II'];
+  let h = '';
+  for (const [t, rows] of [[0, [1, 2, 3]], [1, [11, 12, 13]]]) {
+    const tl = ls.filter(l => rows.includes(l.line_no));
+    if (!tl.length) continue;
+    h += `<table class="grid"><thead><tr><th>${t ? 'After the rate change' : ''}</th>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>`;
+    ['Today', 'Yesterday', 'Difference'].forEach((name, i) => {
+      h += `<tr><th>${name}</th>${cols.map(c => {
+        const l = tl.find(x => x.line_no === rows[i] && x.meter === c);
+        return cell(l, l ? n(l.reading ?? l.liters) : '');
+      }).join('')}</tr>`;
+    });
+    h += '</tbody></table>';
+  }
+  return h;
+}
+
+function salesGrid(ls) {
+  const items = ['liters_before_testing', 'testing_liters', 'sale_liters', 'rate', 'amount'];
+  const rows = [...new Set(ls.map(l => l.line_no))].sort((a, b) => a - b);
+  let h = `<table class="grid"><thead><tr><th></th>${items.map(i => `<th>${ITEM[i]}</th>`).join('')}</tr></thead><tbody>`;
+  for (const r of rows) {
+    const rl = ls.filter(l => l.line_no === r);
+    h += `<tr><th>${esc(rl[0].fuel || '')}${r > 2 ? ' · 2nd rate' : ''}</th>${items.map(i => {
+      const l = rl.find(x => x.item === i);
+      return cell(l, l ? n(i === 'rate' ? l.rate : i === 'amount' ? l.amount : l.liters) : '');
+    }).join('')}</tr>`;
+  }
+  return h + '</tbody></table>';
+}
+
+function rowHtml(l) {
+  const stock = l.section === 'stock';
+  const v = l.section === 'note' ? '' : stock ? n(l.liters) : n(l.amount ?? l.reading ?? l.liters);
+  const bits = stock ? [`dip ${n(l.reading)}`, l.label] : [l.label, l.party && l.party !== l.label ? '→ ' + l.party : '',
+    l.section === 'jama' ? l.fuel : '', l.liters != null && l.amount != null ? n(l.liters) + ' L' : '',
+    l.note && l.note !== l.label ? l.note : ''];
+  const kind = kindOf(l);
+  const chip = l.category ? `<span class="chip${l.category_by === 'rule' ? ' auto' : ''}" title="${CAT_BY[l.category_by]}">${esc(l.category)}</span>` : '';
+  const fuel = l.fuel_shown ? `<span class="fuel fuel-${l.fuel_shown.toLowerCase()}${l.fuel_by === 'written' ? '' : ' guess'}" ` +
+    `title="${esc(FUEL_BY[l.fuel_by] + (l.fuel_note ? ': ' + l.fuel_note : ''))}">${l.fuel_shown}</span>` : '';
+  return `<div class="row ${statusClass(l)}" data-place="${l.place}"><span class="sg">${SIGN[l.sign] ?? ''}</span>` +
+    `<span class="v">${v}</span><span class="w">${kind ? `<b>${esc(kind)}</b> ` : ''}${esc(bits.filter(Boolean).join(' · '))}${fuel}${chip}</span>${marks(l)}</div>`;
+}
+
+function checksBox(p) {
+  const { failed, passed } = p.checks;
+  const bad = failed.map(f => `<div class="item bad" data-places="${f.places.join(' ')}">✗ ${esc(f.message)}</div>`).join('');
+  const good = passed.length ? `<details><summary>✓ ${failed.length ? passed.length + ' more add up' : 'All ' + passed.length + ' add up'}</summary>` +
+    passed.map(c => `<div class="item" data-places="${c.places.join(' ')}">✓ ${esc(c.check)}</div>`).join('') + '</details>' : '';
+  const none = !failed.length && !passed.length ? '<div class="muted">No sums could be checked on this page.</div>' : '';
+  const why = p.explained ? `<div class="explain">${esc(p.explained)}</div>` : '';
+  return `<div class="box"><div class="btitle">Page sums</div>${bad}${good}${none}${why}</div>`;
+}
+
+function sourcesBox(p) {
+  if (!p.sources.length && !p.others.length) return '';
+  const rows = p.sources.filter(s => s.status !== 'uncovered').map(s =>
+    `<div class="item st-${s.status}" data-places="${s.places.join(' ')}" title="${ST[s.status][1]}"><span class="ic">${ST[s.status][0]}</span> ` +
+    `<b>${esc(s.name)}</b> <span class="muted">page ${val(s.page, s.unit)} ·</span> source ${val(s.other, s.unit)}` +
+    `${s.status !== 'verified' && s.diff ? ` · <b>${diff(s.diff, s.unit)}</b>` : ''}<span class="muted">${shiftNote(s)}</span></div>`).join('');
+  const none = p.sources.filter(s => s.status === 'uncovered').map(s => s.name);
+  const gap = none.length ? `<div class="item st-uncovered"><span class="ic">○</span> <span class="muted">No data for this day: ${esc(none.join(', '))}</span></div>` : '';
+  return `<div class="box"><div class="btitle">Other sources</div>${rows}${gap}${p.others.map(o => `<div class="other">${esc(o)}</div>`).join('')}</div>`;
+}
+
+function pageNoteBox(p) {
+  if (HOSTED) return p.notes.note ? `<div class="box pnote">📝 ${esc(p.notes.note)}</div>` : '';
+  return `<div class="box pnote"><textarea id="pageNote" rows="2" placeholder="Your note on this page">${esc(p.notes.note || '')}</textarea>` +
+    `<div class="pnrow"><span class="muted">${p.notes.updated && p.notes.note ? 'saved ' + p.notes.updated.replace('T', ' ') : ''}</span>` +
+    '<button id="savePageNote">Save page note</button></div></div>';
+}
+
+function renderSide() {
+  const p = S.page, L = p.lines;
+  const boxed = L.filter(l => l.box).length, photo = L.filter(l => l.resolution === 'photo').length;
+  let h = `<h2>${day(p.date, true)}</h2><div class="meta">${p.register === 'feb-mar' ? 'MS + HSD register (Feb–Mar)' : 'HSD + MS register'}` +
+    ` · ${L.length} lines · ${p.boxed ? boxed + ' boxed on the photo' : 'boxes not located yet'}${photo ? ` · ${photo} settled on the photo` : ''}</div>`;
+  if (p.in_ledgers === false) h += '<div class="newpage">🆕 New page: stored as read, not in the ledgers yet.' +
+    (HOSTED ? '</div>' : ' Check it, then <button id="toLedgers">Add to ledgers</button></div>');
+  h += checksBox(p) + sourcesBox(p) + pageNoteBox(p);
+  for (const [sec, title] of SECTIONS) {
+    const ls = L.filter(l => l.section === sec && l.item !== 'header');
+    if (!ls.length) continue;
+    h += `<h3>${title}</h3>` + (sec === 'meter' ? meterGrid(ls) : sec === 'sales' ? salesGrid(ls)
+      : `<div class="rows">${ls.map(rowHtml).join('')}</div>`);
+  }
+  $('#content').innerHTML = h;
+  S.order = $$('#content [data-place]').map(e => e.dataset.place);
+  if ($('#savePageNote')) $('#savePageNote').onclick = savePageNote;
+  if ($('#toLedgers')) $('#toLedgers').onclick = () => addToLedgers(p.date);
+  if (S.sel) $$(`[data-place="${CSS.escape(S.sel)}"]`).forEach(e => e.classList.add('sel'));
+}
+
+function renderDetail() {
+  const el = $('#detail'), l = S.sel && S.by[S.sel];
+  if (!l) {
+    el.innerHTML = `<div class="dempty">Click a box on the photo or a line here to see its checks${HOSTED ? '' : ' and add a note'}.` +
+      '<br>← → change page · ↑ ↓ move between lines · ⌘ or Ctrl + scroll (or pinch) to zoom · Esc to close</div>';
+    return;
+  }
+  const sec = (SECTIONS.find(s => s[0] === l.section) || [, l.section])[1], kind = kindOf(l);
+  const nt = S.page.notes.lines?.[l.place] || {}, facts = [];
+  if (l.check === 'fail') l.check_notes.forEach(m => facts.push(`<div class="bad">✗ ${esc(m)}</div>`));
+  if (l.check === 'ok') facts.push(`<div class="good">✓ Adds up: ${esc(l.check_notes.join(' · '))}</div>`);
+  for (const i of l.sources) {
+    const s = S.page.sources[i];
+    facts.push(`<div class="st-${s.status}"><span class="ic">${ST[s.status][0]}</span> ${esc(s.name)}: page ${val(s.page, s.unit)} · ` +
+      (s.status === 'uncovered' ? 'no data for this day' : `source ${val(s.other, s.unit)}${s.diff ? ' · ' + diff(s.diff, s.unit) : ''}`) +
+      shiftNote(s) + '</div>');
+  }
+  if (!l.check && !l.sources.length) facts.push('<div class="muted">No page sum or other source covers this line.</div>');
+  if (l.why) facts.push(`<div>📷 Settled on the photo: ${esc(l.why)}</div>`);
+  if (l.fuel_by && l.fuel_by !== 'written') facts.push(`<div>⛽ ${l.fuel_shown}: ${esc(FUEL_BY[l.fuel_by])}${l.fuel_note ? ` (${esc(l.fuel_note)})` : ''}</div>`);
+  if (l.disputed.length) facts.push(`<div><span class="m words">Aa</span> The models read it differently: ` +
+    Object.entries(l.models).map(([m, v]) => `${esc(m)}: “${esc(Object.values(v).join(' / '))}”`).join(' · ') + '</div>');
+  if (S.page.boxed && !l.box) facts.push('<div class="muted">⌀ Not found on the photo.</div>');
+  const catBy = `<span class="muted">${l.category_by === 'rule' ? 'automatic' : CAT_BY[l.category_by]?.replace('Your category', 'your choice')}</span>`;
+  const cat = !l.category ? '' : HOSTED ? `<div class="catrow"><span>Category</span><b>${esc(l.category)}</b>${catBy}</div>` :
+    '<div class="catrow"><span>Category</span><select id="dCat">' +
+    (S.page.categories[l.category_group] || []).map(c => `<option${c === l.category ? ' selected' : ''}>${esc(c)}</option>`).join('') +
+    '<option value="__new">+ New category…</option>' + (l.category_by !== 'rule' ? '<option value="__auto">Back to automatic</option>' : '') +
+    '</select>' + (l.label_written ? `<label><input type="checkbox" id="dCatAll"${l.category_by === 'label' ? ' checked' : ''}> all ` +
+    `${l.label_count} line${l.label_count === 1 ? '' : 's'} written “${esc(l.label_written)}”</label>` : '') +
+    catBy + '</div>';
+  const saved = `<span class="muted">${nt.updated ? 'saved ' + nt.updated.replace('T', ' ') : ''}</span>`;
+  const review = HOSTED ? (nt.status || nt.paper || nt.note ? `<div class="review">${nt.status ? `<b>${STATUS[nt.status]}</b>` : ''}` +
+    `${nt.paper ? `<div>Paper says: ${esc(nt.paper)}</div>` : ''}${nt.note ? `<div>${esc(nt.note)}</div>` : ''}${saved}</div>` : '') : '';
+  el.innerHTML =`<div class="dhead"><b>${esc(sec)}${kind ? ' · ' + esc(kind) : ''}</b><span class="muted">${l.place}</span>` +
+    '<span class="spacer"></span><button id="dClose" title="Close (Esc)">×</button></div>' +
+    `<div class="dval">${esc(describe(l))}</div><div class="facts">${facts.join('')}</div>${cat}${review}`;
+  $('#dClose').onclick = () => select(null);
+  if (HOSTED) return;
+  el.insertAdjacentHTML('beforeend', `<div class="review"><div class="seg">${Object.entries(STATUS).map(([k, t]) =>
+      `<button data-st="${k}" class="${nt.status === k ? 'on p-' + k : ''}">${t}</button>`).join('')}</div>` +
+    `<input id="dPaper" placeholder="Paper says…" value="${esc(nt.paper || '')}">` +
+    `<textarea id="dNote" rows="2" placeholder="Your note on this line">${esc(nt.note || '')}</textarea>` +
+    `<div class="drow">${saved}<button id="dClear">Clear</button><button id="dSave" class="primary">Save</button></div></div>`);
+  let status = nt.status || '';
+  $$('#detail .seg button').forEach(b => b.onclick = () => {
+    status = status === b.dataset.st ? '' : b.dataset.st;
+    $$('#detail .seg button').forEach(x => { x.className = x.dataset.st === status ? 'on p-' + status : ''; });
+  });
+  $('#dSave').onclick = () => saveLine(l.place, { status, paper: $('#dPaper').value, note: $('#dNote').value });
+  $('#dClear').onclick = () => saveLine(l.place, { status: '', paper: '', note: '' });
+  if ($('#dCat')) $('#dCat').onchange = e => {
+    let name = e.target.value;
+    if (name === '__new') name = (prompt('Name of the new category') || '').trim();
+    if (name === '__new' || (!name && e.target.value === '__new')) { e.target.value = l.category; return; }
+    saveCategory(l.place, name === '__auto' ? '' : name, $('#dCatAll')?.checked ? 'label' : 'line');
+  };
+  for (const f of [$('#dPaper'), $('#dNote')]) f.onkeydown = e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('#dSave').click(); };
+}
+
+function setSave(text, bad) {
+  $('#saveState').textContent = text;
+  $('#saveState').className = bad ? 'bad' : 'muted';
+}
+
+async function post(body) {
+  setSave('Saving…');
+  try {
+    const j = await getJSON('/api/note', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: S.date, ...body }) });
+    S.page.notes = j.notes;
+    const entry = S.index.find(p => p.date === S.date);
+    entry.notes = Object.keys(j.notes.lines || {}).length + (j.notes.note ? 1 : 0);
+    fillPicker();
+    const top = $('#side').scrollTop;
+    renderSide();
+    renderDetail();
+    $('#side').scrollTop = top;
+    setSave('Saved');
+  } catch (e) {
+    setSave('Not saved: ' + e.message, true);
+  }
+}
+const saveLine = (place, rec) => post({ place, ...rec });
+
+async function reloadPage() {
+  const p = await getJSON('/api/page?date=' + S.date), top = $('#side').scrollTop;
+  S.page = p;
+  S.by = Object.fromEntries(p.lines.map(l => [l.place, l]));
+  drawBoxes();
+  renderSide();
+  renderDetail();
+  $('#side').scrollTop = top;
+  if (S.sel) $$(`[data-place="${CSS.escape(S.sel)}"]`).forEach(e => e.classList.add('sel'));
+}
+
+async function saveCategory(place, category, scope) {
+  setSave('Saving…');
+  try {
+    await getJSON('/api/category', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: S.date, place, category, scope }) });
+    await reloadPage();
+    setSave('Saved');
+  } catch (e) {
+    setSave('Not saved: ' + e.message, true);
+  }
+}
+const savePageNote = () => post({ note: $('#pageNote').value });
+
+function scrollToBox([y0, x0, y1, x1]) {
+  const pane = $('#photoPane'), stage = $('#stage');
+  pane.scrollTo({ left: (x0 + x1) / 2000 * stage.offsetWidth - pane.clientWidth / 2,
+    top: (y0 + y1) / 2000 * stage.offsetHeight - pane.clientHeight / 2, behavior: 'smooth' });
+}
+
+function select(place, from) {
+  S.sel = place || null;
+  $$('.sel').forEach(e => e.classList.remove('sel'));
+  if (S.sel) {
+    $$(`[data-place="${CSS.escape(S.sel)}"]`).forEach(e => e.classList.add('sel'));
+    const l = S.by[S.sel];
+    if (l?.box && from !== 'photo') scrollToBox(l.box);
+    if (from !== 'side') $(`#content [data-place="${CSS.escape(S.sel)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+  renderDetail();
+}
+
+function hover(places) {
+  $$('.hot').forEach(e => e.classList.remove('hot'));
+  for (const p of places) $$(`[data-place="${CSS.escape(p)}"]`).forEach(e => e.classList.add('hot'));
+}
+
+function setZoom(z, ax, ay) {
+  const pane = $('#photoPane'), stage = $('#stage');
+  z = Math.min(5, Math.max(0.25, z));
+  ax ??= pane.clientWidth / 2;
+  ay ??= pane.clientHeight / 2;
+  const fx = (pane.scrollLeft + ax) / stage.offsetWidth, fy = (pane.scrollTop + ay) / stage.offsetHeight;
+  S.zoom = z;
+  stage.style.width = z * 100 + '%';
+  $('#zoomLabel').textContent = Math.round(z * 100) + '%';
+  pane.scrollLeft = fx * stage.offsetWidth - ax;
+  pane.scrollTop = fy * stage.offsetHeight - ay;
+}
+
+function fitPage() {
+  const pane = $('#photoPane'), img = $('#photo');
+  if (!img.naturalWidth) return;
+  setZoom(Math.min(1, pane.clientHeight / pane.clientWidth * img.naturalWidth / img.naturalHeight));
+  pane.scrollTo(0, 0);
+}
+
+function step(dir) {
+  const list = S.index.filter(shown);
+  const next = list[list.findIndex(p => p.date === S.date) + dir];
+  if (next) openPage(next.date);
+}
+
+const monthName = m => new Date(m + '-01T00:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+
+function sumCell(s, u, tol, offDays) {
+  if (!s.days) return '<td class="muted" title="No data from the other side for these days">–</td>';
+  const cls = tol == null ? '' : Math.abs(s.diff) > tol ? 'warn' : 'okc';
+  const off = offDays && s.off ? `<div class="sub">${s.off} day${s.off > 1 ? 's' : ''} off</div>` : '';
+  return `<td class="${cls}" title="${s.days} days compared · page total ${val(s.page, u)}">${diff(s.diff, u)}${off}</td>`;
+}
+
+async function showMonths() {
+  const rows = (await getJSON('/api/months')).filter(m => m.month >= FY_START.slice(0, 7) || $('#early').checked);
+  const keys = ['phonepe', 'card', 'deposits', 'sales', 'hsd_litres', 'ms_litres'];
+  const total = { pages: 0, flagged: 0, failed: 0, testing_off: 0, unmatched: 0, first_flagged: null,
+    review: { ok: 0, differs: 0, to_check: 0 }, vinay: { page: 0, hdfc: 0, days: 0 },
+    sums: Object.fromEntries(keys.map(k => [k, { page: 0, diff: 0, days: 0, off: 0 }])) };
+  for (const m of rows) {
+    for (const k of ['pages', 'flagged', 'failed', 'testing_off', 'unmatched']) total[k] += m[k];
+    for (const k in total.review) total.review[k] += m.review[k];
+    for (const k in total.vinay) total.vinay[k] += m.vinay[k];
+    for (const k of keys) for (const f in total.sums[k]) total.sums[k][f] += m.sums[k][f];
+  }
+  const review = r => r.ok + r.differs + r.to_check ? `✓${r.ok} ✗${r.differs} ?${r.to_check}` : '<span class="muted">–</span>';
+  const vinay = v => !v.days ? '<td class="muted" title="HDFC statement not loaded for these days">no HDFC data</td>'
+    : `<td class="${Math.abs(v.page - v.hdfc) > 100 ? 'warn' : 'okc'}" title="page ${inr(v.page)} · HDFC ${inr(v.hdfc)}">${diff(Math.round((v.page - v.hdfc) * 100) / 100, '₹')}</td>`;
+  const cells = m => `<td>${m.pages}</td><td class="${m.flagged ? 'bad' : 'okc'}">` +
+    (m.first_flagged ? `<a href="#" data-go="${m.first_flagged}" title="Open the first flagged page">${m.flagged} ❌</a>` : m.flagged ? `${m.flagged} ❌` : '0') +
+    `</td><td class="${m.failed ? 'bad' : 'okc'}">${m.failed}</td><td>${review(m.review)}</td>` +
+    sumCell(m.sums.phonepe, '₹', 100, true) + sumCell(m.sums.card, '₹', 100) + sumCell(m.sums.deposits, '₹', 100, true) + vinay(m.vinay) +
+    `<td class="${m.unmatched ? 'warn' : 'muted'}" title="Udhar parties' bank and co-op receipts written on no page">${m.unmatched ? inr(m.unmatched) : '–'}</td>` +
+    sumCell(m.sums.sales, '₹') + sumCell(m.sums.hsd_litres, 'L') + sumCell(m.sums.ms_litres, 'L') +
+    `<td class="${m.testing_off ? 'warn' : 'okc'}">${m.testing_off}</td>`;
+  $('#months').innerHTML = `<div class="mhead"><h2>Month summary</h2><span class="muted">${rows.length ? monthName(rows[0].month) + ' – ' +
+    monthName(rows[rows.length - 1].month) : ''} · each figure is the page minus the other side</span><span class="spacer"></span>` +
+    '<button id="monthsClose" title="Close (Esc)">×</button></div><div class="mtable"><table class="months"><thead><tr><th>Month</th><th>Pages</th>' +
+    '<th>Flagged</th><th>Sums ✗</th><th title="Your marks: OK on paper / Differs / To check">Your review</th><th>PhonePe</th><th>Card</th>' +
+    '<th>Co-op deposits</th><th>Vinay Gas</th><th>Receipts on no page</th><th>Sales vs IRAS</th><th>HSD litres</th><th>MS litres</th>' +
+    '<th>Testing days off</th></tr></thead><tbody>' +
+    rows.map(m => `<tr><th><a href="#" data-go="${m.first}" title="Open the month's first page">${monthName(m.month)}</a></th>${cells(m)}</tr>`).join('') +
+    `</tbody><tfoot><tr><th>Total</th>${cells(total)}</tr></tfoot></table></div>` + catTable(rows, 'kharcha', 'Kharcha by category') +
+    catTable(rows, 'money_in', 'Money in by category (repayments and other money in, from the cash flow)') +
+    '<p class="mfoot muted">Each figure is the page minus the other side, added up over the days both sides cover; orange means off by more ' +
+    'than ₹100, or a day off. Card money moves between neighbouring days, so only its month total counts. Sales and litres agree only by month: ' +
+    'the page runs 9 am to 9 am and IRAS by the calendar day, and sales are compared only on days IRAS captured in full. Click a month to open ' +
+    'its first page, or the flagged count to open its first ❌ page.</p>';
+  $('#monthsClose').onclick = () => { $('#months').hidden = true; };
+  $('#months').hidden = false;
+}
+
+function catTable(rows, key, title) {
+  const inr0 = v => '₹' + Math.round(v).toLocaleString('en-IN'), sum = o => Object.values(o).reduce((a, b) => a + b, 0);
+  const cats = {};
+  for (const m of rows) for (const [c, v] of Object.entries(m[key])) (cats[c] ||= {})[m.month] = v;
+  const order = Object.keys(cats).sort((a, b) => sum(cats[b]) - sum(cats[a]));
+  const short = m => new Date(m + '-01T00:00:00').toLocaleDateString('en-GB', { month: 'short' });
+  return `<h3>${title}</h3><div class="mtable"><table class="months"><thead><tr><th>Category</th>` +
+    rows.map(m => `<th>${short(m.month)}</th>`).join('') + '<th>Total</th></tr></thead><tbody>' +
+    order.map(c => `<tr><th>${esc(c)}</th>` + rows.map(m => `<td>${cats[c][m.month] ? inr0(cats[c][m.month]) : '<span class="muted">–</span>'}</td>`).join('') +
+      `<td><b>${inr0(sum(cats[c]))}</b></td></tr>`).join('') +
+    '</tbody><tfoot><tr><th>Total</th>' + rows.map(m => `<td>${inr0(sum(m[key]))}</td>`).join('') +
+    `<td>${inr0(order.reduce((a, c) => a + sum(cats[c]), 0))}</td></tr></tfoot></table></div>`;
+}
+
+const KIND_LABEL = { hisaab: 'Hisaab pages (photos)', hdfc: 'HDFC statement (PDF)', coop: 'Co-op statement (photos)' };
+const JOB_STATUS = { queued: 'waiting to start', running: 'working…', waiting: 'ready: check, then Apply', done: 'done', failed: 'stopped' };
+const postJSON = (url, body) => getJSON(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+let picked = [], jobTimer = null;
+const jobsSeen = {};
+
+function showInbox() {
+  $('#inbox').innerHTML = '<div class="mhead"><h2>Add files</h2><span class="muted">read and checked the same way as by hand; ' +
+    'nothing is stored until you press Apply</span><span class="spacer"></span><button id="inboxClose" title="Close (Esc)">×</button></div>' +
+    '<div class="drop" id="drop"><div class="kinds">' + Object.entries(KIND_LABEL).map(([k, t], i) =>
+      `<label><input type="radio" name="kind" value="${k}"${i ? '' : ' checked'}> ${t}</label>`).join('') + '</div>' +
+    '<div class="muted">Drop the files here, or <label class="pick">choose them<input type="file" id="files" multiple hidden></label>. ' +
+    'Hisaab photos: one page per photo, any number at once; each page\'s date is read from the page.</div>' +
+    '<div id="picked" class="muted"></div><button id="upload" class="primary" disabled>Upload and read</button></div>' +
+    '<h3>Uploads</h3><div id="jobs" class="muted">Loading…</div>';
+  $('#inbox').hidden = false;
+  $('#inboxClose').onclick = () => { $('#inbox').hidden = true; };
+  const drop = $('#drop');
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); pick([...e.dataTransfer.files]); };
+  $('#files').onchange = e => pick([...e.target.files]);
+  $('#upload').onclick = upload;
+  loadJobs();
+}
+
+function pick(files) {
+  picked = files;
+  $('#picked').textContent = files.map(f => `${f.name} (${Math.round(f.size / 1024)} KB)`).join(', ');
+  $('#upload').disabled = !files.length;
+}
+
+async function upload() {
+  const kind = document.querySelector('input[name="kind"]:checked').value;
+  const batch = new Date().toISOString().replace(/\D/g, '').slice(0, 14) + '-' + kind;
+  $('#upload').disabled = true;
+  try {
+    for (const [i, f] of picked.entries()) {
+      $('#picked').textContent = `Uploading ${i + 1} of ${picked.length}: ${f.name}…`;
+      const r = await fetch(`/api/upload?batch=${batch}&name=${encodeURIComponent(f.name)}`, { method: 'POST', body: f });
+      if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+    }
+    await postJSON('/api/jobs', { kind, batch });
+    pick([]);
+    loadJobs();
+  } catch (e) {
+    $('#picked').textContent = 'Upload failed: ' + e.message;
+    $('#upload').disabled = false;
+  }
+}
+
+function jobHtml(j) {
+  const what = j.kind === 'ledgers' ? `${j.label}: ${day(j.day)}` : j.label;
+  const pages = j.kind === 'hisaab' && j.status === 'done' ? '<div class="jact">' + j.pages.map(d =>
+    `<a href="#" data-go="${d}">Open ${day(d)}</a><button data-ledgers="${d}">Add ${day(d)} to ledgers</button>`).join('') + '</div>' : '';
+  return `<div class="job js-${j.status}"><div><b>${esc(what)}</b> <span class="muted">${j.created.replace('T', ' ').slice(5, 16)}</span> ` +
+    `<span class="jst">${JOB_STATUS[j.status]}</span></div>` + (j.summary ? `<div>${esc(j.summary)}</div>` : '') +
+    (j.status === 'waiting' ? `<button class="primary" data-apply="${j.id}">Apply</button>` : '') + pages +
+    (j.steps.length ? `<details${j.status === 'failed' ? ' open' : ''}><summary>Steps (${j.steps.length})</summary>` + j.steps.map(s =>
+      `<div class="${s.ok ? '' : 'bad'}">${s.ok ? '✓' : '✗'} ${esc(s.name)}</div>${s.out ? `<pre>${esc(s.out)}</pre>` : ''}`).join('') +
+      '</details>' : '') + '</div>';
+}
+
+async function loadJobs() {
+  clearTimeout(jobTimer);
+  const jobs = await getJSON('/api/jobs');
+  let stored = false;
+  for (const j of jobs) {
+    if (jobsSeen[j.id] && jobsSeen[j.id] !== 'done' && j.status === 'done') stored = true;
+    jobsSeen[j.id] = j.status;
+  }
+  if (stored) {  // something new is in the database: show it
+    await loadIndex();
+    if (S.date) await reloadPage();
+  }
+  if (!$('#inbox').hidden) $('#jobs').innerHTML = jobs.length ? jobs.map(jobHtml).join('') : 'No uploads yet.';
+  if (jobs.some(j => j.status === 'queued' || j.status === 'running')) jobTimer = setTimeout(loadJobs, 2000);
+}
+
+async function addToLedgers(date) {
+  try {
+    await postJSON('/api/ledgers', { date });
+    showInbox();
+  } catch (e) {
+    setSave('Not started: ' + e.message, true);
+  }
+}
+
+$('#inboxBtn').onclick = showInbox;
+$('#inbox').addEventListener('click', async e => {
+  const t = e.target.closest('[data-apply], [data-ledgers], [data-go]');
+  if (!t) return;
+  e.preventDefault();
+  if (t.dataset.go) {
+    $('#inbox').hidden = true;
+    return openPage(t.dataset.go);
+  }
+  t.disabled = true;
+  try {
+    if (t.dataset.apply) await postJSON('/api/jobs/apply', { id: t.dataset.apply });
+    else await postJSON('/api/ledgers', { date: t.dataset.ledgers });
+  } catch (err) {
+    alert(err.message);
+  }
+  loadJobs();
+});
+
+$('#monthsBtn').onclick = showMonths;
+$('#months').addEventListener('click', e => {
+  const a = e.target.closest('[data-go]');
+  if (!a) return;
+  e.preventDefault();
+  $('#months').hidden = true;
+  openPage(a.dataset.go);
+});
+$('#overlay').addEventListener('click', e => { const r = e.target.closest('rect'); if (r) select(r.dataset.place, 'photo'); });
+$('#overlay').addEventListener('mouseover', e => { const r = e.target.closest('rect'); hover(r ? [r.dataset.place] : []); });
+$('#overlay').addEventListener('mouseleave', () => hover([]));
+$('#content').addEventListener('click', e => {
+  const t = e.target.closest('[data-place], [data-places]');
+  if (!t || e.target.closest('summary')) return;
+  if (t.dataset.place) return select(t.dataset.place, 'side');
+  const first = t.dataset.places.split(' ').find(p => S.by[p]?.box);
+  if (first) scrollToBox(S.by[first].box);
+});
+$('#content').addEventListener('mouseover', e => {
+  const t = e.target.closest('[data-place], [data-places]');
+  hover(!t ? [] : t.dataset.place ? [t.dataset.place] : t.dataset.places.split(' ').filter(Boolean));
+});
+$('#content').addEventListener('mouseleave', () => hover([]));
+$('#photoPane').addEventListener('wheel', e => {
+  if (!e.ctrlKey && !e.metaKey) return;
+  e.preventDefault();
+  const r = $('#photoPane').getBoundingClientRect();
+  setZoom(S.zoom * Math.min(1.25, Math.max(0.8, Math.exp(-e.deltaY * 0.01))), e.clientX - r.left, e.clientY - r.top);
+}, { passive: false });
+document.addEventListener('keydown', e => {
+  if (e.target.closest('input, textarea, select')) return;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); step(e.key === 'ArrowLeft' ? -1 : 1); }
+  else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const i = S.order.indexOf(S.sel);
+    select(S.order[i < 0 ? 0 : Math.min(S.order.length - 1, Math.max(0, i + (e.key === 'ArrowDown' ? 1 : -1)))], 'key');
+  }
+  else if (e.key === 'Escape') {
+    if (!$('#inbox').hidden) $('#inbox').hidden = true;
+    else if (!$('#months').hidden) $('#months').hidden = true;
+    else select(null);
+  }
+  else if (e.key === '+' || e.key === '=') setZoom(S.zoom * 1.25);
+  else if (e.key === '-') setZoom(S.zoom / 1.25);
+  else if (e.key === '0') setZoom(1);
+});
+$('#prev').onclick = () => step(-1);
+$('#next').onclick = () => step(1);
+$('#pick').onchange = e => openPage(e.target.value);
+$('#only').onchange = fillPicker;
+$('#early').onchange = () => { fillPicker(); if (!$('#months').hidden) showMonths(); };
+$('#zoomIn').onclick = () => setZoom(S.zoom * 1.25);
+$('#zoomOut').onclick = () => setZoom(S.zoom / 1.25);
+$('#fitWidth').onclick = () => setZoom(1);
+$('#fitPage').onclick = fitPage;
+
+(async () => {
+  if (HOSTED && !await signIn()) return;
+  await loadIndex();
+  const asked = location.hash.slice(1), want = /^(\d{4}-\d\d-\d\d|months)$/.test(asked) ? asked : HOSTED ? remembered() : '';
+  // a day without a page yet (a dashboard link to today) opens the last page before it
+  const start = S.index.find(p => p.date === want) || S.index.findLast(p => p.date >= FY_START && p.date <= want) ||
+    S.index.find(p => p.date >= FY_START) || S.index[0];
+  if (start) await openPage(start.date);
+  if (want === 'months') await showMonths();
+})().catch(e => document.body.insertAdjacentHTML('afterbegin', `<div class="err">${esc(e.message)}</div>`));
+</script>
+</body>
+</html>

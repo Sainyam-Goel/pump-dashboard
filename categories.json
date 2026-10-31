@@ -1,0 +1,72 @@
+{
+ "kharcha": {
+  "fallback": "Miscellaneous",
+  "categories": [
+   "Salary & Wages",
+   "Food & Tea (Staff)",
+   "Tips & Rewards",
+   "Density Checks",
+   "Fuel & Vehicle",
+   "Bank & Cash Charges",
+   "Maintenance & Repairs",
+   "Cleaning & Supplies",
+   "Electricity & Utilities",
+   "Office & Stationery",
+   "Donations & Religious",
+   "Medicine & Cow Care",
+   "Miscellaneous"
+  ],
+  "rules": [
+   {
+    "category": "Food & Tea (Staff)",
+    "pattern": "TEA|CHAI|FOOD|KHANA|BREAKFAST|SNACK|MILK|LUNCH|DINNER|चाय|खाना|नाश्ता|दूध|समोसा|बर्फ"
+   },
+   {
+    "category": "Tips & Rewards",
+    "pattern": "REWARD|TIP|इनाम|ईनाम|बख्शीश"
+   },
+   {
+    "category": "Density Checks",
+    "pattern": "DENSITY|डेंसिटी|डैंसिटी|डेन्सिटी"
+   },
+   {
+    "category": "Donations & Religious",
+    "pattern": "DONATION|DAAN|दान|PUJA|पूजा|TEMPLE|MANDIR|मंदिर|DHOOP|धूप|धुप|INCENSE|PRASAD|प्रसाद|BABA|बाबा|SATSANG|सतसंग|WORSHIP"
+   },
+   {
+    "category": "Medicine & Cow Care",
+    "pattern": "MEDICINE|DAWAI|दवाई|दवा|DOCTOR|\\bCOW|CALF|गाय|बछड़|PASHU|पशु|\\bVET\\b"
+   },
+   {
+    "category": "Bank & Cash Charges",
+    "pattern": "BANK|DEPOSIT|CO-?OP|बैंक|PENALTY|पेनल्टी|INTEREST|ब्याज|TORN NOTE|PHONEPE|PAYTM|\\bUPI\\b"
+   },
+   {
+    "category": "Fuel & Vehicle",
+    "pattern": "GENERATOR|जनरेटर|जरनेटर|SCOOTY|स्कूटी|MOTORCYCLE|MOTOR CYCLE|\\bBIKE|VEHICLE|गाड़ी|गाडी|\\bCAR\\b|TAXI|TEMPO|\\bAUTO\\b|PETROL|DIESEL|FUEL|\\bMS FOR|\\bHSD FOR|TRACTOR"
+   },
+   {
+    "category": "Electricity & Utilities",
+    "pattern": "ELECTRICITY|BIJLI|बिजली|LIGHT BILL|WATER BILL|MOBILE|RECHARGE|रिचार्ज|\\bPHONE|INTERNET|WIFI|\\bSIM\\b"
+   },
+   {
+    "category": "Maintenance & Repairs",
+    "pattern": "MISTRI|मिस्त्री|PLUMBER|प्लंबर|PAINTER|पेंटर|PAINT|पेंट|REPAIR|रिपेयर|मरम्मत|MECHANIC|मैकेनिक|ELECTRICIAN|WELDING|वेल्डिंग|BULB|बल्ब|\\bLED\\b|BATTERY|बैटरी|\\bFAN\\b|पंखा|SWITCH|\\bLOCK|ताला|MACHINE|मशीन|\\bMOTOR\\b|CEMENT|सीमेंट|FILTER|THERMOMETER|STAMPING|CHARGER|CABLE|PUNCTURE|पंचर"
+   },
+   {
+    "category": "Office & Stationery",
+    "pattern": "PHOTOSTAT|फोटोस्टेट|STATIONERY|\\bPEN\\b|PENCIL|REGISTER|रजिस्टर|\\bCOPY|कॉपी|कापी|PRINT|SAMPLE|नमूना|PAPER|COURIER|OFFICE|ऑफिस|दफ्तर"
+   },
+   {
+    "category": "Cleaning & Supplies",
+    "pattern": "SAFAI|सफाई|SOAP|साबुन|SABUN|SURF|PHENYL|फिनाइल|BROOM|झाड़ू|झाडू|HARPIC|DETERGENT|HANDWASH|पोंछा|CLEAN|SUPPLY|सप्लाई|GOODS|सामान|SAMAN|DUSTBIN"
+   },
+   {
+    "category": "Salary & Wages",
+    "pattern": "SALARY|सैलरी|सलरी|WAGE|मजदूरी|मजूरी|SALESM[AE]N|सेल्समैन|सेलजमैन|सैलजमैन|सैल्समैन|सेल्समेन|SWEEPER|स्वीपर|जमादार|CHOWKIDAR|चौकीदार|GUARD|गार्ड|LABOU?R|मजदूर|DIHADI|दिहाड़ी|STAFF|ADVANCE|एडवांस|HARDAYAL|हरदयाल|SUNIL|सुनील|SURESH|सुरेश|SANDEEP|संदीप|ANGREJ|अंग्रेज|BALWAN|बलवान|VISHAL|विशाल|ROSHAN|रोशन|MANAGER|मैनेजर|मुनीम"
+   }
+  ]
+ },
+ "labels": {},
+ "lines": {}
+}

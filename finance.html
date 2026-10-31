@@ -102,6 +102,7 @@ tr:hover td { background: #181b2844; }
   </div>
   <div style="text-align:right">
     <button class="nav-btn" onclick="location.href='./'">&larr; Dashboard</button>
+    <button class="nav-btn" onclick="location.href='hisaab.html'">Hisaab pages</button>
   </div>
 </div>
 
@@ -300,60 +301,9 @@ let registerDates = [];// { date } — physical register offloads (for health ca
 let ioclChart = null;
 let chart = null;
 
-// Expense bin classification (client-side; categories written in the ledger)
-// Handles English + Hindi (transliterated) category names from the OCR.
-const BIN_RULES = [
-  {
-    bin: 'Salary & Wages',
-    re: /SALARY|SALESMAN|JAMADAR|CHOWKIDAR|CHAUKIDAR|STAFF|LABOR|LABOUR|MAJDOOR|DIHADI|SWEEPER|KAIPUR|SECURITY|GUARD|SURAKSHA|MUKESH.*SALESMAN|SURESH|SANDEEP|SUNIL.*SALARY|HARDAYAL|HARDHYAN|ANGREJ|AJAY.*SALARY|ROSHAN|MANAGER|SELSMAN|ADVANCE.*(SALARY|SALESMAN|JAMADAR|SWEEPER|STAFF)|मुनीम|सैलरी|सलरी|सेल्समैन|सेलजमैन|सैलजमैन|सैल्समैन|मैलजमैन|मैलमैन|मैलजमैने|स्वीपर|जमादार|चौकीदार|गार्ड|मजदूर|मजूरी|सिक्योरिटी|रोशन|हरदयाल|हरध्यान|अंग्रेज|सुनील|सुरेश|संदीप|सन्नी|मैनेजर|मैलजमेन|चक सेलमेन/i
-  },
-  {
-    bin: 'Food & Tea (Staff)',
-    re: /TEA|CHAI|FOOD|KHANA|KHAN|चाय|खाना|दूध|पानी|बर्फ|स्नैक्स|नाश्ता|SNACK|AALU|आलू/i
-  },
-  {
-    bin: 'Maintenance & Repairs',
-    re: /MISTRI|PLUMBER|MAINTENANCE|MAINTAIN|REPAIR|MACHINE|मशीन|MOTOR|THERMOSTAT|AUTOMATION|BULB|LED|BATTERY|DENSITY|PHOTOSTAT|CALCULATOR|कॉपी|कापी|COPY|COMPUTER|METER|ELECTRICITY|BIJLI|बिजली|BILL BIJLI|HITECH|DRAWING|SITE|THERMOMETER|थर्मामीटर|पंचर|प्लास|LOCK|टेप|STAMPING|STAMP|चार्जर|केबल|HISAB|हिसाब|KHATA|खाता|REGISTER|सिलाई|CURTAIN|पर्दा|FAN|पंखा|SWITCH|WHITE CEMENT|सीमेंट|PAINT|पेंट|GITTI|गिट्टी|FILTER|मरम्मत|ठीक|पेचकस|पेंच/i
-  },
-  {
-    bin: 'Fuel & Vehicle (Home/Shop)',
-    re: /GENERATOR|जनरेटर|जरनेटर|SCOOTY|स्कूटी|सुकती|सुकरी|MOTORCYCLE|CYCLE|VEHICLE|गाडी|गाड़ी|TROOP|UPPP|INOVA|INNOVA|DIESEL.*LTR|FUEL|पेट्रोल|PETROL|GADI|TAXI|टैक्सी|TEMPO|टेम्पू|टेम्पो|TRUCK|HITECH.*VEHICLE|HSD.*VEHICLE|MS.*VEHICLE|HARDAYAL.*VEHICLE|SATSANG|सतसंग|SCOOTY.*(PUMP|PETROL|PUNCH)|SATYAM|SANYAM/i
-  },
-  {
-    bin: 'Donations & Religious',
-    re: /DONATION|DAAN|दान|PUJA|पूजा|TEMPLE|MANDIR|मंदिर|DHOOP|धुप|धूप|PRASAD|प्रसाद|BABA JI|बाबा|MANDIR|जय मंदिर|JAY MANDIR|INCENSE|पूजन/i
-  },
-  {
-    bin: 'Cleaning & Supplies',
-    re: /SAFAI|सफाई|SOAP|SABUN|साबुन|SURF|PHENYL|BROOM|JHAADU|झाड़ू|HARPIC|TEZAAB|SAMAN|सामान|SUPPLY|DETERGENT|HANDWASH|WIPES|POWDER|Phenyl|SWEEPING|DHULAI|धुलाई|पोंछा|Jhadu/i
-  },
-  {
-    bin: 'Medicine & Cow Care',
-    re: /MEDICINE|DAWAI|दवाई|दवा|MEDS|COW|CALF|गाय|बछड़ा|PASHU|पशु|VET/i
-  },
-  {
-    bin: 'Electricity & Utilities',
-    re: /ELECTRICITY|BIJLI|बिजली|BILL BIJLI|METER.*ELECTRIC|POWER|CURRENT|बिल|BILL|WATER|पानी|MOTOR.*WATER|TUBE WELL|ट्यूबवेल|TANK CHECK|PHONE|MOBILE|RECHARGE|रिचार्ज|INTERNET|SIM|TELECOM/i
-  },
-  {
-    bin: 'Bank & Cash Charges',
-    re: /BANK|JAMA|जमा|CASH.*(BANK|DEPOSIT)|BANK.*(DEPOSIT|JAMA)|MS.*BANK|COOP|MSF|CASH OUT|Torn Note|टूटा|DISC|छूट|पेनाल्टी|PENALTY|INTEREST|ब्याज/i
-  },
-  {
-    bin: 'Office & Stationery',
-    re: /PHOTOSTAT|फोटो|OFFICE|दफ्तर|PEN|पेन|PENCIL|DUSTER|बोर्ड|REGISTER|KHATA|खाता|COPY|कॉपी|HISAB|हिसाब|PAD|CALCULATOR|गणक|PRINTER|SAMPLE|नमूना|POLICY/i
-  },
-  { bin: 'Miscellaneous', re: /.*/i },
-];
-const FALLBACK_BIN = 'Miscellaneous';
-
-function categorize(cat) {
-  const c = String(cat || '');
-  for (const rule of BIN_RULES) {
-    if (rule.re.test(c)) return rule.bin;
-  }
-  return FALLBACK_BIN;
-}
+// Expense bins: the hisaab viewer's kharcha categories (categories.json, from ops/categories.json at deploy).
+let kharchaCats = null;
+const categorize = row => financeModel.kharchaCategory(row, kharchaCats);
 
 function fmt(n) { return n == null ? '--' : Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 }); }
 function fmtR(n) { return n == null ? '--' : '\u20B9' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 }); }
@@ -389,7 +339,7 @@ async function rpc(name, body = {}) {
 async function loadAll() {
   try {
     await modelReady;
-    const [l, c, e, s, cc, fr, nr, lube] = await Promise.all([
+    const [l, c, e, s, cc, fr, nr, lube, kc] = await Promise.all([
       query('v_reported_daily_inputs', 'order=date.asc&select=date,hsd_income,ms_income,total_income,yesterday_cash,total_cash,phonepe,hdfc_card,bank_deposit,cash_picked,total_credit,total_expenses'),
       query('v_credit_events', 'order=date.asc&select=date,party_name,type,amount,source,ref_no'),
       query('v_expense_events', 'order=date.asc&select=date,category,amount'),
@@ -398,8 +348,10 @@ async function loadAll() {
       query('fuel_rates', 'order=date.asc&select=date,petrol_rate,diesel_rate'),
       query('nozzle_receipts', 'order=date.asc&select=date,nozzle_id,reading'),
       query('lubricant_sales', 'order=date.asc&select=date,product,quantity,amount'),
+      fetch('categories.json').then(r => { if (!r.ok) throw new Error('categories.json: HTTP ' + r.status); return r.json(); }),
     ]);
     ledger = l; credits = c; expenses = e; settlements = s; ccTxns = cc; fuelRates = fr; nozzleReceipts = nr; lubeSales = lube;
+    kharchaCats = kc;
     // Calendar-day liters from the daily_sales_liters RPC (server-side aggregation,
     // matches the daily_ledger income frame). NOTE: the 9AM→9AM shift RPC
     // (iss_shift_totals) bleeds into adjacent days and is NOT used for COGS.
@@ -956,12 +908,12 @@ function renderLineItems(present, start, end) {
   for(const customer of recorded) document.getElementById('creditBody').innerHTML+=`<div class="card-sub">${financeModel.escapeHtml(customer.party_name)}: ${customer.verified_outstanding==null?'Outstanding unknown — opening balance unverified':fmtR(customer.verified_outstanding)+' outstanding'}; last repayment ${fmtDate(customer.last_repayment_date)}.</div>`;
 
   // Expenses grouped by BIN (with per-category detail)
-  const eAgg = {};        // bin → { total, items: {category: amt} }
+  const eAgg = Object.create(null);        // bin → { total, items: {category: amt} }; bins are user-named
   expenses.forEach(r => {
     if (r.date < start || r.date > end) return;
-    const bin = categorize(r.category);
+    const bin = categorize(r);
     const cat = r.category || '?';
-    if (!eAgg[bin]) eAgg[bin] = { total: 0, items: {} };
+    if (!eAgg[bin]) eAgg[bin] = { total: 0, items: Object.create(null) };
     eAgg[bin].total += Number(r.amount) || 0;
     eAgg[bin].items[cat] = (eAgg[bin].items[cat] || 0) + (Number(r.amount) || 0);
   });
@@ -971,13 +923,14 @@ function renderLineItems(present, start, end) {
   bins.forEach(bin => {
     const b = eAgg[bin];
     etotal += b.total;
-    ehtml += `<div class="bin-header">${bin} <span style="float:right">${fmtR(b.total)}</span></div>`;
+    ehtml += `<div class="bin-header">${financeModel.escapeHtml(bin)} <span style="float:right">${fmtR(b.total)}</span></div>`;
     Object.entries(b.items).sort((a, b2) => b2[1] - a[1]).forEach(([cat, amt]) => {
       ehtml += `<div class="line-item"><span class="desc">${financeModel.escapeHtml(cat)}</span><span class="amt">${fmtR(amt)}</span></div>`;
     });
   });
   if (bins.length) ehtml += `<div class="ledger-row total"><span class="label">Total Expenses</span><span class="amt">${fmtR(etotal)}</span></div>`;
-  document.getElementById('expenseSub').textContent = present.length ? (period === 'day' ? fmtDate(start) : fmtDate(start) + ' \u2013 ' + fmtDate(end)) : '';
+  const hisaab = period === 'day' ? `<a href="hisaab.html#${start}">hisaab page &#8599;</a>` : '<a href="hisaab.html#months">month summary &#8599;</a>';
+  document.getElementById('expenseSub').innerHTML = present.length ? (period === 'day' ? fmtDate(start) : fmtDate(start) + ' \u2013 ' + fmtDate(end)) + ' &middot; ' + hisaab : '';
   document.getElementById('expenseBody').innerHTML = ehtml;
 }
 
@@ -1235,7 +1188,7 @@ function expensesRows(from, to) {
   const rows = [['Date', 'Category', 'Bin', 'Amount']];
   expenses
     .filter(e => (!from || e.date >= from) && (!to || e.date <= to))
-    .forEach(e => rows.push([e.date, e.category, categorize(e.category), money(e.amount)]));
+    .forEach(e => rows.push([e.date, e.category, categorize(e), money(e.amount)]));
   return rows;
 }
 

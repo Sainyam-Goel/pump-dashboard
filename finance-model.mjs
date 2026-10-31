@@ -76,3 +76,18 @@ export function periodEstimate(days, margin) {
     beforeKharcha:before.length?operating(before):null,
     marginShare:share(complete)+share(before)};
 }
+
+// Kharcha bins are the hisaab viewer's categories (ops/categories.json; its kharcha part is deployed as categories.json),
+// chosen as the viewer chooses: your choice for that line, then for every line written so, then the first rule whose
+// pattern matches the label. An expense row has no place on the page, so a one-line choice is found by its date, label
+// and amount (two lines alike on one day can't be told apart here). Kharcha rules don't test the line's kind ('item'):
+// a row here doesn't carry it.
+export function kharchaCategory(row, cats) {
+  const line = Object.entries(cats.lines).find(([key, v]) => key.startsWith(row.date + '/') && v.label === row.category &&
+    Math.abs(v.amount - row.amount) < 0.01);
+  if (line) return line[1].category;
+  const label = cats.labels['kharcha:' + String(row.category || '').replace(/\s*\([^()]*\)\s*$/, '').trim()];
+  if (label) return label;
+  const rule = cats.kharcha.rules.find(r => !r.pattern || new RegExp(r.pattern, 'i').test(row.category || ''));
+  return rule ? rule.category : cats.kharcha.fallback;
+}
