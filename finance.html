@@ -300,7 +300,8 @@ let registerDates = [];// { date } — physical register offloads (for health ca
 let ioclChart = null;
 let chart = null;
 
-// Expense bins: the hisaab viewer's kharcha categories (categories.json, from ops/categories.json at deploy).
+// Expense bins: the hisaab viewer's kharcha categories: the rules from categories.json (made at deploy from
+// ops/categories.json) and the owner's choices, read live from v_kharcha_category_choices (sql/029).
 let kharchaCats = null;
 const categorize = row => financeModel.kharchaCategory(row, kharchaCats);
 
@@ -348,6 +349,11 @@ async function loadAll() {
     ]);
     ledger = l; credits = c; expenses = e; settlements = s; lubeSales = lube;
     kharchaCats = kc;
+    try {
+      const chosen = await query('v_kharcha_category_choices', 'select=key,scope,category,label,amount&order=key');
+      kharchaCats.labels = Object.fromEntries(chosen.filter(c => c.scope === 'label').map(c => [c.key, c.category]));
+      kharchaCats.lines = Object.fromEntries(chosen.filter(c => c.scope === 'line').map(c => [c.key, c]));
+    } catch (err) { console.warn('kharcha category choices not available; bins follow the rules only', err); }
     // Calendar-day liters from the daily_sales_liters RPC (server-side aggregation,
     // matches the daily_ledger income frame). NOTE: the 9AM→9AM shift RPC
     // (iss_shift_totals) bleeds into adjacent days and is NOT used for COGS.

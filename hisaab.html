@@ -177,7 +177,8 @@ td .sub { font-size: 11px; color: var(--muted); font-weight: 400; }
 <script>
 const NS = 'http://www.w3.org/2000/svg';
 const FY_START = '2026-04-01';  // the fiscal year; earlier pages are listed only with "Show Feb–Mar"
-const S = { index: [], date: null, page: null, by: {}, order: [], sel: null, zoom: 1 };
+const S = { index: [], date: null, page: null, by: {}, order: [], sel: null, zoom: 1,
+  fb: {}, choices: { labels: {}, lines: {} }, names: {}, catLines: [] };  // hosted: the live feedback (sql/029)
 // hisaab.html on the dashboard (GitHub Pages) is this page as a read-only copy: it signs in by email link and reads
 // what the Mac viewer published to the private bucket (sql/027), which only an approved operator can read.
 const HOSTED = location.pathname.endsWith('/hisaab.html');
@@ -237,13 +238,130 @@ async function getJSON(url, opts) {
   return j;
 }
 
-async function published(url) {  // the viewer's own /api answers, as the Mac uploaded them
-  const path = { '/api/index': 'index.json', '/api/months': 'months.json' }[url] ||
+async function published(url) {  // the viewer's own /api answers as the Mac uploaded them, with everyone's live feedback
+  const path = { '/api/index': 'index.json', '/api/months': 'months.json', '/api/category_lines': 'category_lines.json' }[url] ||
     (url.startsWith('/api/page?date=') ? `pages/${url.slice('/api/page?date='.length)}.json` : '');
-  if (!path) throw new Error('Not in the read-only copy: ' + url);
+  if (!path) throw new Error('Not in the dashboard copy: ' + url);
   const { data, error } = await DB.storage.from(BUCKET).download(path);
   if (error) throw error;
-  return JSON.parse(await data.text());
+  const j = JSON.parse(await data.text());
+  if (url === '/api/index') for (const p of j.pages) p.notes = noteCount(S.fb[p.date]);
+  if (url === '/api/months') monthsWithFeedback(j);
+  if (path.startsWith('pages/')) withFeedback(j);
+  return j;
+}
+
+// Feedback lives online (sql/029), in the same rows the Mac viewer reads and writes. hisaab.html reads them once after
+// the login; another device's edits show on the next reload (nothing polls).
+const noteCount = n => n ? Object.keys(n.lines).length + (n.note ? 1 : 0) : 0;
+const stamp = r => ({ updated: new Date(r.updated_at).toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' }).slice(0, 16),
+  by: r.updated_by });
+const savedAt = n => n.updated ? 'saved ' + n.updated.replace('T', ' ') +
+  (n.by ? (n.by === 'mac viewer' ? ' on the Mac' : ' on the dashboard') : '') : '';
+
+function addNote(r) {
+  const page = S.fb[r.page_date] ||= { lines: {} };
+  if (r.place) page.lines[r.place] = { status: r.status || '', paper: r.paper || '', note: r.note || '', stored: r.stored,
+    line_id: r.line_id, ...stamp(r) };
+  else Object.assign(page, { note: r.note || '' }, stamp(r));
+}
+
+async function loadFeedback() {
+  const all = async (table, ...keys) => {  // ordered by the table's key, so the pages of 1,000 don't skip or repeat
+    const out = [];
+    for (;;) {
+      const { data, error } = await keys.reduce((q, k) => q.order(k), DB.from(table).select('*')).range(out.length, out.length + 999);
+      if (error) throw error;
+      out.push(...data);
+      if (data.length < 1000) return out;
+    }
+  };
+  const [notes, choices, names] = await Promise.all([all('hisaab_feedback', 'page_date', 'place'),
+    all('hisaab_category_choices', 'key'), all('hisaab_category_names', 'grp', 'name')]);
+  S.fb = {};
+  notes.forEach(addNote);
+  S.choices = { labels: {}, lines: {} };
+  for (const r of choices) if (r.scope === 'label') S.choices.labels[r.key] = r.category; else S.choices.lines[r.key] = r;
+  S.names = { kharcha: [], money_in: [] };
+  for (const r of names.sort((a, b) => a.created_at.localeCompare(b.created_at))) S.names[r.grp].push(r.name);
+}
+
+function categoryOf(g, d, place, label, rule) {  // the viewer's order: this line's choice, every line written so, the rules
+  const own = S.choices.lines[`${d}/${place}`], byLabel = S.choices.labels[`${g}:${label}`];
+  return own ? [own.category, 'line'] : byLabel ? [byLabel, 'label'] : [rule, 'rule'];
+}
+
+function withFeedback(p) {
+  p.notes = S.fb[p.date] || { lines: {} };
+  for (const l of p.lines) if (l.category_group)
+    [l.category, l.category_by] = categoryOf(l.category_group, p.date, l.place, l.label_written, l.category_rule);
+  for (const [g, list] of Object.entries(p.categories))  // the owner's categories go before the fallback, which stays last
+    for (const n of S.names[g] || []) if (!list.includes(n)) list.splice(list.length - 1, 0, n);
+  return p;
+}
+
+function monthsWithFeedback(rows) {  // the month tables that depend on feedback, added up as the Mac viewer does
+  const by = Object.fromEntries(rows.map(m => [m.month,
+    Object.assign(m, { review: { ok: 0, differs: 0, to_check: 0 }, kharcha: Object.create(null), money_in: Object.create(null) })]));
+  for (const c of S.catLines) {
+    const m = by[c.date.slice(0, 7)], cat = categoryOf(c.group, c.date, c.place, c.label, c.rule)[0];
+    if (m) m[c.group][cat] = Math.round(((m[c.group][cat] || 0) + c.amount) * 100) / 100;
+  }
+  for (const [d, n] of Object.entries(S.fb)) {
+    const m = by[d.slice(0, 7)];
+    if (m && S.index.some(p => p.date === d)) for (const r of Object.values(n.lines)) if (r.status in m.review) m.review[r.status]++;
+  }
+  return rows;
+}
+
+async function saveFeedback(body) {  // hosted: the line's or the page's row; empty fields remove it
+  const d = S.date, place = body.place || '', l = place ? S.by[place] : null;
+  const rec = place ? { status: body.status || '', paper: (body.paper || '').trim(), note: (body.note || '').trim() }
+    : { note: (body.note || '').trim() };
+  if (Object.values(rec).some(Boolean)) {
+    const stored = l && Object.fromEntries(['label', 'reading', 'liters', 'rate', 'amount'].filter(k => l[k] != null).map(k => [k, l[k]]));
+    const { data, error } = await DB.from('hisaab_feedback').upsert({ page_date: d, place, status: rec.status || null,
+      paper: rec.paper || null, note: rec.note || null, line_id: l ? l.id : null, stored: stored || null },
+      { onConflict: 'page_date,place' }).select().single();
+    if (error) throw error;
+    addNote(data);
+  } else {
+    const { error } = await DB.from('hisaab_feedback').delete().match({ page_date: d, place });
+    if (error) throw error;
+    const page = S.fb[d];
+    if (page && place) delete page.lines[place];
+    else if (page) for (const k of ['note', 'updated', 'by']) delete page[k];
+  }
+  return S.fb[d] || { lines: {} };
+}
+
+async function saveChoice(place, category, scope) {  // hosted: a category for this line or for every line written so
+  const l = S.by[place], g = l.category_group, name = category.split(/\s+/).filter(Boolean).join(' ');
+  let key = `${S.date}/${place}`;
+  if (name.length > 60) throw new Error('a category name has at most 60 characters');
+  if (name && !S.page.categories[g].includes(name)) {
+    const { error } = await DB.from('hisaab_category_names').upsert({ grp: g, name }, { onConflict: 'grp,name', ignoreDuplicates: true });
+    if (error) throw error;
+    S.names[g].push(name);
+  }
+  const own = key;
+  if (scope === 'label') key = `${g}:${l.label_written}`;
+  if (name) {
+    const one = scope === 'line', row = { key, scope, grp: g, category: name, label: one ? l.label : null, amount: one ? l.amount : null };
+    const { error } = await DB.from('hisaab_category_choices').upsert(row, { onConflict: 'key' });
+    if (error) throw error;
+    if (one) S.choices.lines[key] = row; else S.choices.labels[key] = name;
+  } else {
+    const { error } = await DB.from('hisaab_category_choices').delete().eq('key', key);
+    if (error) throw error;
+    delete S.choices.lines[key];
+    delete S.choices.labels[key];
+  }
+  if (scope === 'label') {  // a choice for the label replaces this line's own; dropped last, so a failed save loses nothing
+    const { error } = await DB.from('hisaab_category_choices').delete().eq('key', own);
+    if (error) throw error;
+    delete S.choices.lines[own];
+  }
 }
 
 function showPhoto(d) {
@@ -256,7 +374,7 @@ function showPhoto(d) {
 }
 
 async function signIn() {
-  $('#inboxBtn').style.display = 'none';  // uploads, notes and categories stay on the Mac
+  $('#inboxBtn').style.display = 'none';  // uploads need the Mac's tools
   $('#early').parentElement.style.display = 'none';  // the copy holds the pages from 1 Apr only (header labels are flex, so not .hidden)
   const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2.118.0');
   DB = createClient(SUPABASE, ANON_KEY);
@@ -422,9 +540,8 @@ function sourcesBox(p) {
 }
 
 function pageNoteBox(p) {
-  if (HOSTED) return p.notes.note ? `<div class="box pnote">📝 ${esc(p.notes.note)}</div>` : '';
   return `<div class="box pnote"><textarea id="pageNote" rows="2" placeholder="Your note on this page">${esc(p.notes.note || '')}</textarea>` +
-    `<div class="pnrow"><span class="muted">${p.notes.updated && p.notes.note ? 'saved ' + p.notes.updated.replace('T', ' ') : ''}</span>` +
+    `<div class="pnrow"><span class="muted">${p.notes.note ? savedAt(p.notes) : ''}</span>` +
     '<button id="savePageNote">Save page note</button></div></div>';
 }
 
@@ -452,7 +569,7 @@ function renderSide() {
 function renderDetail() {
   const el = $('#detail'), l = S.sel && S.by[S.sel];
   if (!l) {
-    el.innerHTML = `<div class="dempty">Click a box on the photo or a line here to see its checks${HOSTED ? '' : ' and add a note'}.` +
+    el.innerHTML = `<div class="dempty">Click a box on the photo or a line here to see its checks and add a note.` +
       '<br>← → change page · ↑ ↓ move between lines · ⌘ or Ctrl + scroll (or pinch) to zoom · Esc to close</div>';
     return;
   }
@@ -473,21 +590,17 @@ function renderDetail() {
     Object.entries(l.models).map(([m, v]) => `${esc(m)}: “${esc(Object.values(v).join(' / '))}”`).join(' · ') + '</div>');
   if (S.page.boxed && !l.box) facts.push('<div class="muted">⌀ Not found on the photo.</div>');
   const catBy = `<span class="muted">${l.category_by === 'rule' ? 'automatic' : CAT_BY[l.category_by]?.replace('Your category', 'your choice')}</span>`;
-  const cat = !l.category ? '' : HOSTED ? `<div class="catrow"><span>Category</span><b>${esc(l.category)}</b>${catBy}</div>` :
-    '<div class="catrow"><span>Category</span><select id="dCat">' +
+  const cat = !l.category ? '' : '<div class="catrow"><span>Category</span><select id="dCat">' +
     (S.page.categories[l.category_group] || []).map(c => `<option${c === l.category ? ' selected' : ''}>${esc(c)}</option>`).join('') +
     '<option value="__new">+ New category…</option>' + (l.category_by !== 'rule' ? '<option value="__auto">Back to automatic</option>' : '') +
     '</select>' + (l.label_written ? `<label><input type="checkbox" id="dCatAll"${l.category_by === 'label' ? ' checked' : ''}> all ` +
     `${l.label_count} line${l.label_count === 1 ? '' : 's'} written “${esc(l.label_written)}”</label>` : '') +
     catBy + '</div>';
-  const saved = `<span class="muted">${nt.updated ? 'saved ' + nt.updated.replace('T', ' ') : ''}</span>`;
-  const review = HOSTED ? (nt.status || nt.paper || nt.note ? `<div class="review">${nt.status ? `<b>${STATUS[nt.status]}</b>` : ''}` +
-    `${nt.paper ? `<div>Paper says: ${esc(nt.paper)}</div>` : ''}${nt.note ? `<div>${esc(nt.note)}</div>` : ''}${saved}</div>` : '') : '';
+  const saved = `<span class="muted">${savedAt(nt)}</span>`;
   el.innerHTML =`<div class="dhead"><b>${esc(sec)}${kind ? ' · ' + esc(kind) : ''}</b><span class="muted">${l.place}</span>` +
     '<span class="spacer"></span><button id="dClose" title="Close (Esc)">×</button></div>' +
-    `<div class="dval">${esc(describe(l))}</div><div class="facts">${facts.join('')}</div>${cat}${review}`;
+    `<div class="dval">${esc(describe(l))}</div><div class="facts">${facts.join('')}</div>${cat}`;
   $('#dClose').onclick = () => select(null);
-  if (HOSTED) return;
   el.insertAdjacentHTML('beforeend', `<div class="review"><div class="seg">${Object.entries(STATUS).map(([k, t]) =>
       `<button data-st="${k}" class="${nt.status === k ? 'on p-' + k : ''}">${t}</button>`).join('')}</div>` +
     `<input id="dPaper" placeholder="Paper says…" value="${esc(nt.paper || '')}">` +
@@ -517,11 +630,11 @@ function setSave(text, bad) {
 async function post(body) {
   setSave('Saving…');
   try {
-    const j = await getJSON('/api/note', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: S.date, ...body }) });
-    S.page.notes = j.notes;
+    const notes = HOSTED ? await saveFeedback(body) : (await getJSON('/api/note', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: S.date, ...body }) })).notes;
+    S.page.notes = notes;
     const entry = S.index.find(p => p.date === S.date);
-    entry.notes = Object.keys(j.notes.lines || {}).length + (j.notes.note ? 1 : 0);
+    entry.notes = noteCount(notes);
     fillPicker();
     const top = $('#side').scrollTop;
     renderSide();
@@ -548,7 +661,8 @@ async function reloadPage() {
 async function saveCategory(place, category, scope) {
   setSave('Saving…');
   try {
-    await getJSON('/api/category', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    if (HOSTED) await saveChoice(place, category, scope);
+    else await getJSON('/api/category', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ date: S.date, place, category, scope }) });
     await reloadPage();
     setSave('Saved');
@@ -833,7 +947,10 @@ $('#fitWidth').onclick = () => setZoom(1);
 $('#fitPage').onclick = fitPage;
 
 (async () => {
-  if (HOSTED && !await signIn()) return;
+  if (HOSTED) {
+    if (!await signIn()) return;
+    [S.catLines] = await Promise.all([published('/api/category_lines'), loadFeedback()]);
+  }
   await loadIndex();
   const asked = location.hash.slice(1), want = /^(\d{4}-\d\d-\d\d|months)$/.test(asked) ? asked : HOSTED ? remembered() : '';
   // a day without a page yet (a dashboard link to today) opens the last page before it
