@@ -7,6 +7,7 @@
    "Tips & Rewards",
    "Density Checks",
    "Fuel & Vehicle",
+   "Family Car Fuel",
    "Bank & Cash Charges",
    "Maintenance & Repairs",
    "Cleaning & Supplies",
@@ -42,8 +43,12 @@
     "pattern": "BANK|DEPOSIT|CO-?OP|बैंक|PENALTY|पेनल्टी|INTEREST|ब्याज|TORN NOTE|PHONEPE|PAYTM|\\bUPI\\b"
    },
    {
+    "category": "Family Car Fuel",
+    "pattern": "स्कूटी|स्कुटी|स्कूती|स्कुती|स्कूटर|SCOOT"
+   },
+   {
     "category": "Fuel & Vehicle",
-    "pattern": "GENERATOR|जनरेटर|जरनेटर|SCOOTY|स्कूटी|MOTORCYCLE|MOTOR CYCLE|\\bBIKE|VEHICLE|गाड़ी|गाडी|\\bCAR\\b|TAXI|TEMPO|\\bAUTO\\b|PETROL|DIESEL|FUEL|\\bMS FOR|\\bHSD FOR|TRACTOR"
+    "pattern": "GENERATOR|जनरेटर|जरनेटर|MOTORCYCLE|MOTOR CYCLE|\\bBIKE|VEHICLE|गाड़ी|गाडी|\\bCAR\\b|TAXI|TEMPO|\\bAUTO\\b|PETROL|DIESEL|FUEL|\\bMS FOR|\\bHSD FOR|TRACTOR"
    },
    {
     "category": "Electricity & Utilities",
