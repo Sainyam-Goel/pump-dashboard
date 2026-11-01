@@ -341,8 +341,8 @@ async function loadAll() {
     await modelReady;
     const [l, c, e, s, lube, kc] = await Promise.all([
       query('v_reported_daily_inputs', 'order=date.asc&select=date,hsd_income,ms_income,total_income,yesterday_cash,total_cash,phonepe,hdfc_card,bank_deposit,cash_picked,total_credit,total_expenses,cash_repayments,other_cash_in,other_cash_out,hisaab_fark'),
-      query('v_credit_events', 'order=date.asc&select=date,party_name,type,amount,source,ref_no'),
-      query('v_expense_events', 'order=date.asc&select=date,category,amount'),
+      query('v_credit_events', 'order=date.asc,id.asc&select=date,party_name,type,amount,source,ref_no'),
+      query('v_expense_events', 'order=date.asc,category.asc,amount.asc&select=date,category,amount'),
       query('settlements', 'order=date.asc&select=date,source,amount,transactions'),
       query('lubricant_sales', 'order=date.asc&select=date,product,quantity,amount'),
       fetch('categories.json', { cache: 'no-cache' }).then(r => {  // revalidated: a rule change shows at once
@@ -359,16 +359,16 @@ async function loadAll() {
     // matches the daily_ledger income frame). NOTE: the 9AM→9AM shift RPC
     // (iss_shift_totals) bleeds into adjacent days and is NOT used for COGS.
     [calendarSales,padData,supplierAccounts,supplierStatements,digitalSales,customerBalances]=await Promise.all([
-      query('v_finance_sales_daily','order=date.asc'),query('supplier_ledger_entries','order=date.asc'),
+      query('v_finance_sales_daily','order=date.asc'),query('supplier_ledger_entries','order=date.asc,company_code.asc,entry_key.asc'),
       query('v_supplier_account','order=company_code'),query('v_supplier_statement_coverage','order=period_start.asc'),
-      query('v_digital_sales_daily','order=date.asc'),
+      query('v_digital_sales_daily','order=date.asc,provider.asc'),
       query('v_customer_balances','order=party_name')]);
     shiftTotals=calendarSales.map(row=>({...row,shift_date:row.date,hsd_income:row.hsd_revenue,ms_income:row.ms_revenue}));
     dayLiters=Object.fromEntries(calendarSales.map(row=>[row.date,{ms_l:Number(row.ms_liters)||0,hsd_l:Number(row.hsd_liters)||0}]));
-    try { bankIocl = await query('bank_transactions', 'category=eq.iocl&order=date.asc&select=date,withdrawal&limit=2000'); } catch (err) { bankIocl = []; console.warn('bank_transactions not available:', err); }
-    try { bankAll = await query('bank_transactions', 'order=date.asc&select=date&limit=5000'); } catch (err) { bankAll = []; }
-    try { invoiceDates = await query('fuel_tanker_tracker', 'order=date.asc&select=date&limit=1000'); } catch (err) { invoiceDates = []; }
-    try { registerDates = await query('tanker_unloading', 'order=date.asc&select=date&limit=1000'); } catch (err) { registerDates = []; }
+    try { bankIocl = await query('bank_transactions', 'category=eq.iocl&order=date.asc,id.asc&select=date,withdrawal&limit=2000'); } catch (err) { bankIocl = []; console.warn('bank_transactions not available:', err); }
+    try { bankAll = await query('bank_transactions', 'order=date.asc,id.asc&select=date&limit=5000'); } catch (err) { bankAll = []; }
+    try { invoiceDates = await query('fuel_tanker_tracker', 'order=date.asc,id.asc&select=date&limit=1000'); } catch (err) { invoiceDates = []; }
+    try { registerDates = await query('tanker_unloading', 'order=date.asc,id.asc&select=date&limit=1000'); } catch (err) { registerDates = []; }
     const today=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
     latestDate=calendarSales.filter(row=>row.date<today).at(-1)?.date || ledger.at(-1)?.date || null;
     anchor = parseISO(latestDate);
@@ -474,7 +474,8 @@ function dayFacts(date, L) {
   const dayEnd=Date.parse(date+'T23:59:59+05:30');
   const iocl=supplierStatements.some(s=>s.period_start<=date && s.period_end>=date && s.complete &&
     s.verified_chain && Date.parse(s.captured_at)>dayEnd);
-  const fees=(padData||[]).filter(t=>t.date===date && t.category==='fee').reduce((sum,t)=>sum+(Number(t.debit)||0),0);
+  const fees=(padData||[]).filter(t=>t.date===date && t.category==='fee').reduce((sum,t)=>sum+(Number(t.debit)||0),0)
+    +digitalSales.filter(d=>d.date===date).reduce((sum,d)=>sum+(Number(d.fees)||0),0);  // IOCL, card MSF and PhonePe fees
   const lube=lubeSales.filter(x=>x.date===date).reduce((sum,x)=>sum+(Number(x.amount)||0),0);
   const flags={sales:!!row?.sales_complete,prices:!!cg,iocl,kharcha:!!close};
   const gap=row?.meter_gap_liters;
@@ -492,7 +493,7 @@ function agg(present) {
   let hsd = 0, ms = 0, other = 0, ledgerInc = 0, exp = 0, credit = 0, pp = 0, hdfc = 0, bank = 0, picked = 0;
   let cogsTotal = 0, hsdL = 0, msL = 0;
   let cashRepaid = 0, otherIn = 0, otherOut = 0, bankRepaid = 0;
-  let ioclMargin = 0, ioclFees = 0;
+  let ioclMargin = 0, ioclFees = 0, digitalFees = 0;
   present.forEach(d => {
     const r = L[d];
     if (r) {
@@ -536,6 +537,7 @@ function agg(present) {
          financeModel.marginMonth(t.description,t.date)===start.slice(0,7)) ioclMargin+=Number(t.credit)||0;
     });
   }
+  digitalSales.forEach(d => { if (d.date >= start && d.date <= end) digitalFees += Number(d.fees) || 0; });  // card MSF, PhonePe
   const manual=present.filter(date=>L[date]);
   const opening=manual.length?L[manual[0]].yesterday_cash:null;
   const closing=manual.length?L[manual.at(-1)].total_cash:null;
@@ -551,7 +553,7 @@ function agg(present) {
   const complete=facts.every(day=>day.kind==='complete');
   const revenue = hsd + ms + other;
   if(present.some(date=>!cogsForDay(date))) cogsTotal=null;
-  return { hsd, ms, other, cashRepaid, otherIn, otherOut, fark, breaks, bankRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL, ioclMargin, ioclFees,complete,estimate,missing:facts.filter(day=>day.kind!=='complete'),manualDays:manual.length,requestedDays:requested.length };
+  return { digitalFees, hsd, ms, other, cashRepaid, otherIn, otherOut, fark, breaks, bankRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL, ioclMargin, ioclFees,complete,estimate,missing:facts.filter(day=>day.kind!=='complete'),manualDays:manual.length,requestedDays:requested.length };
 }
 
 function renderSummary(present) {
@@ -610,11 +612,12 @@ function renderPnl(present) {
     <div class="ledger-row total"><span class="label">Gross Margin</span><span class="amt ${gross >= 0 ? 'text-green' : 'text-red'}">${fmtR(gross)}</span></div>
     <div class="ledger-row"><span class="label">Total Expenses (Kharcha)</span><span class="amt text-red">&minus;${fmtR(a.exp)}</span></div>`;
   if (a.ioclFees !== 0) html += `<div class="ledger-row"><span class="label">IOCL Fees &amp; Interest (e-lock, license, participation)</span><span class="amt text-red">&minus;${fmtR(a.ioclFees)}</span></div>`;
+  if (a.digitalFees) html += `<div class="ledger-row"><span class="label">Card &amp; PhonePe Fees</span><span class="amt text-red">&minus;${fmtR(a.digitalFees)}</span></div>`;
   html += `
     <div class="ledger-row total pnl-net ${(e.net??0) >= 0 ? 'positive' : 'negative'}"><span class="label">Operating estimate &mdash; ${e.completeDays} of ${a.requestedDays} days complete</span><span class="amt">${fmtR(e.net)}</span></div>`;
   if (e.beforeKharchaDays) html += `<div class="ledger-row"><span class="label">Before kharcha &mdash; ${e.beforeKharchaDays} day${e.beforeKharchaDays>1?'s':''} with no kharcha recorded</span><span class="amt">${fmtR(e.beforeKharcha)}</span></div>`;
   if (e.marginShare) html += `<div class="ledger-row"><span class="label">incl. YVR464 dealer margin, shared by litres</span><span class="amt text-green">+${fmtR(e.marginShare)}</span></div>`;
-  html += `<div class="card-sub">Counted days only: sales &minus; fuel cost &minus; IOCL fees${period==='month'?' + YVR464 dealer margin':''} &minus; kharcha.${period==='month'?'':' YVR464 is booked to whole months.'}</div>`;
+  html += `<div class="card-sub">Counted days only: sales &minus; fuel cost &minus; IOCL, card and PhonePe fees${period==='month'?' + YVR464 dealer margin':''} &minus; kharcha.${period==='month'?'':' YVR464 is booked to whole months.'}</div>`;
   if (notCounted.length) html += `<div class="warn">Not counted: ${notCounted.slice(0,8).map(day=>`${fmtDate(day.date)} (${day.reason})`).join(' &middot; ')}${notCounted.length>8?` &middot; +${notCounted.length-8} more`:''}</div>`;
 
   el.innerHTML = html;
@@ -1113,6 +1116,7 @@ function pnlRows(a) {
     ['Gross Margin', money(gross)],
     ['Total Expenses (Kharcha)', money(a.exp)],
     ['IOCL Fees & Interest', money(a.ioclFees)],
+    ['Card & PhonePe Fees', money(a.digitalFees)],
     ['Operating estimate (complete days)',net==null?'':money(net)],
     ['Before-kharcha days',a.estimate.beforeKharchaDays],
     ['Before-kharcha estimate',a.estimate.beforeKharcha==null?'':money(a.estimate.beforeKharcha)],
