@@ -58,9 +58,11 @@ export function marginMonth(description, postedOn) {
 
 // A day's operating estimate needs every sale captured, valid prices and the IOCL statement; its
 // kharcha turns that into a full net. Without kharcha the day still gives a before-kharcha estimate.
-export function dayKind({sales,prices,iocl,kharcha}) {
-  if(!sales || !prices || !iocl) return 'incomplete';
-  return kharcha?'complete':'before_kharcha';
+// A day IRAS missed part of counts as 'estimated' when the meters give its missing sales (sql/030).
+export function dayKind({sales,estimated,prices,iocl,kharcha}) {
+  if(!(sales || estimated) || !prices || !iocl) return 'incomplete';
+  if(!kharcha) return 'before_kharcha';
+  return sales?'complete':'estimated';
 }
 
 // Net over a period's complete days, and a before-kharcha estimate over the days that lack only
@@ -70,11 +72,12 @@ export function periodEstimate(days, margin) {
   const total=(list,key)=>list.reduce((sum,day)=>sum+(Number(day[key])||0),0);
   const share=list=>margin && margin.litres>0?margin.credit*total(list,'litres')/margin.litres:0;
   const operating=list=>total(list,'revenue')-total(list,'cogs')-total(list,'fees')+share(list);
-  const complete=days.filter(day=>day.kind==='complete'), before=days.filter(day=>day.kind==='before_kharcha');
-  return {completeDays:complete.length,beforeKharchaDays:before.length,
-    net:complete.length?operating(complete)-total(complete,'exp'):null,
+  const counted=days.filter(day=>day.kind==='complete' || day.kind==='estimated'), before=days.filter(day=>day.kind==='before_kharcha');
+  return {completeDays:days.filter(day=>day.kind==='complete').length,estimatedDays:days.filter(day=>day.kind==='estimated').length,
+    beforeKharchaDays:before.length,
+    net:counted.length?operating(counted)-total(counted,'exp'):null,
     beforeKharcha:before.length?operating(before):null,
-    marginShare:share(complete)+share(before)};
+    marginShare:share(counted)+share(before)};
 }
 
 // Kharcha bins are the hisaab viewer's categories (ops/categories.json; its kharcha part is deployed as categories.json),
