@@ -46,13 +46,14 @@ h3 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color:
 .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
 .box { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 10px; background: var(--soft); }
 .btitle { font-weight: 600; margin-bottom: 3px; }
+.btitle.sub { margin-top: 8px; font-size: 12.5px; }
 .item { padding: 2px 4px; border-radius: 4px; cursor: pointer; }
 .item:hover, .item.hot { background: #ede9fe; }
 .item.bad { color: var(--red); }
 .item .ic { display: inline-block; width: 12px; }
 .st-verified .ic, .st-verified.ic, .st-shifted .ic, .st-shifted.ic { color: var(--green); }
 .st-differs .ic, .st-differs.ic { color: var(--orange); }
-.st-close .ic, .st-close.ic { color: var(--amber); }
+.st-close .ic, .st-close.ic, .st-estimated .ic, .st-estimated.ic { color: var(--amber); }
 .st-uncovered .ic, .st-uncovered.ic { color: var(--muted); }
 details summary { cursor: pointer; color: var(--green); padding: 2px 4px; }
 .explain { margin-top: 6px; font-size: 12.5px; color: #5c4400; background: #fff8e1; border-radius: 6px; padding: 6px 8px; }
@@ -206,7 +207,8 @@ const ITEM = { opening_cash: 'Opening cash', hsd_amount: 'HSD sale', ms_amount: 
   liters_before_testing: 'Litres', testing_liters: 'Testing', sale_liters: 'Sale litres', rate: 'Rate', amount: 'Amount' };
 const SIGN = { '+': '+', '-': '−', '=': '=' };
 const ST = { verified: ['●', 'Matches'], shifted: ['●', 'Matches across neighbouring days'], differs: ['●', 'Differs'],
-  close: ['◐', 'Close: agrees by month'], uncovered: ['○', 'No data for this day'] };
+  close: ['◐', 'Close: agrees by month'], estimated: ['◐', 'Estimated: IRAS missed part of the day'],
+  uncovered: ['○', 'No data for this day'] };
 const shiftNote = s => s.run ? ` · the same money is a day apart: ${s.run.map(([d, x]) => `${day(d)} ${diff(x, s.unit)}`).join(', ')} net to zero` : '';
 const STATUS = { to_check: 'To check', ok: 'OK on paper', differs: 'Differs' };
 const CAT_BY = { rule: 'Category from the rules', label: 'Your category for every line written so', line: 'Your category for this line' };
@@ -529,14 +531,18 @@ function checksBox(p) {
 }
 
 function sourcesBox(p) {
-  if (!p.sources.length && !p.others.length) return '';
+  const iras = p.iras || [];  // pages published before 2 Nov have none
+  if (!p.sources.length && !p.others.length && !iras.length) return '';
   const rows = p.sources.filter(s => s.status !== 'uncovered').map(s =>
     `<div class="item st-${s.status}" data-places="${s.places.join(' ')}" title="${ST[s.status][1]}"><span class="ic">${ST[s.status][0]}</span> ` +
     `<b>${esc(s.name)}</b> <span class="muted">page ${val(s.page, s.unit)} ·</span> source ${val(s.other, s.unit)}` +
-    `${s.status !== 'verified' && s.diff ? ` · <b>${diff(s.diff, s.unit)}</b>` : ''}<span class="muted">${shiftNote(s)}</span></div>`).join('');
+    `${s.status !== 'verified' && s.diff ? ` · <b>${diff(s.diff, s.unit)}</b>` : ''}<span class="muted">${shiftNote(s)}` +
+    `${s.detail ? ` · ${esc(s.detail)}` : ''}</span></div>`).join('');
   const none = p.sources.filter(s => s.status === 'uncovered').map(s => s.name);
   const gap = none.length ? `<div class="item st-uncovered"><span class="ic">○</span> <span class="muted">No data for this day: ${esc(none.join(', '))}</span></div>` : '';
-  return `<div class="box"><div class="btitle">Other sources</div>${rows}${gap}${p.others.map(o => `<div class="other">${esc(o)}</div>`).join('')}</div>`;
+  const own = iras.length ? '<div class="btitle sub">IRAS’s own data</div>' + iras.map(x =>
+    `<div class="item st-${x.status}"><span class="ic">${ST[x.status][0]}</span> ${esc(x.text)}</div>`).join('') : '';
+  return `<div class="box"><div class="btitle">Other sources</div>${rows}${gap}${own}${p.others.map(o => `<div class="other">${esc(o)}</div>`).join('')}</div>`;
 }
 
 function pageNoteBox(p) {
@@ -581,7 +587,7 @@ function renderDetail() {
     const s = S.page.sources[i];
     facts.push(`<div class="st-${s.status}"><span class="ic">${ST[s.status][0]}</span> ${esc(s.name)}: page ${val(s.page, s.unit)} · ` +
       (s.status === 'uncovered' ? 'no data for this day' : `source ${val(s.other, s.unit)}${s.diff ? ' · ' + diff(s.diff, s.unit) : ''}`) +
-      shiftNote(s) + '</div>');
+      shiftNote(s) + (s.detail ? ` <span class="muted">(${esc(s.detail)})</span>` : '') + '</div>');
   }
   if (!l.check && !l.sources.length) facts.push('<div class="muted">No page sum or other source covers this line.</div>');
   if (l.why) facts.push(`<div>📷 Settled on the photo: ${esc(l.why)}</div>`);
@@ -734,12 +740,13 @@ async function showMonths() {
   const rows = (await getJSON('/api/months')).filter(m => m.month >= FY_START.slice(0, 7) || $('#early').checked);
   const keys = ['phonepe', 'card', 'deposits', 'sales', 'hsd_litres', 'ms_litres'];
   const total = { pages: 0, flagged: 0, failed: 0, testing_off: 0, unmatched: 0, first_flagged: null,
-    review: { ok: 0, differs: 0, to_check: 0 }, vinay: { page: 0, hdfc: 0, days: 0 },
+    review: { ok: 0, differs: 0, to_check: 0 }, vinay: { page: 0, hdfc: 0, days: 0 }, iras: { days: 0, estimated: 0 },
     sums: Object.fromEntries(keys.map(k => [k, { page: 0, diff: 0, days: 0, off: 0 }])) };
   for (const m of rows) {
     for (const k of ['pages', 'flagged', 'failed', 'testing_off', 'unmatched']) total[k] += m[k];
     for (const k in total.review) total.review[k] += m.review[k];
     for (const k in total.vinay) total.vinay[k] += m.vinay[k];
+    for (const k in total.iras) total.iras[k] += m.iras?.[k] || 0;  // months published before 2 Nov have none
     for (const k of keys) for (const f in total.sums[k]) total.sums[k][f] += m.sums[k][f];
   }
   const review = r => r.ok + r.differs + r.to_check ? `✓${r.ok} ✗${r.differs} ?${r.to_check}` : '<span class="muted">–</span>';
@@ -751,19 +758,22 @@ async function showMonths() {
     sumCell(m.sums.phonepe, '₹', 100, true) + sumCell(m.sums.card, '₹', 100) + sumCell(m.sums.deposits, '₹', 100, true) + vinay(m.vinay) +
     `<td class="${m.unmatched ? 'warn' : 'muted'}" title="Udhar parties' bank and co-op receipts written on no page">${m.unmatched ? inr(m.unmatched) : '–'}</td>` +
     sumCell(m.sums.sales, '₹') + sumCell(m.sums.hsd_litres, 'L') + sumCell(m.sums.ms_litres, 'L') +
-    `<td class="${m.testing_off ? 'warn' : 'okc'}">${m.testing_off}</td>`;
+    `<td class="${m.testing_off ? 'warn' : 'okc'}">${m.testing_off}</td>` + (!m.iras ? '<td class="muted">–</td>' :
+    `<td class="${m.iras.days ? 'warn' : 'okc'}" title="${m.iras.estimated ? inr(m.iras.estimated) + ' of sales estimated from the meters' : 'Nothing estimated'}">${m.iras.days}</td>`);
   $('#months').innerHTML = `<div class="mhead"><h2>Month summary</h2><span class="muted">${rows.length ? monthName(rows[0].month) + ' – ' +
     monthName(rows[rows.length - 1].month) : ''} · each figure is the page minus the other side</span><span class="spacer"></span>` +
     '<button id="monthsClose" title="Close (Esc)">×</button></div><div class="mtable"><table class="months"><thead><tr><th>Month</th><th>Pages</th>' +
     '<th>Flagged</th><th>Sums ✗</th><th title="Your marks: OK on paper / Differs / To check">Your review</th><th>PhonePe</th><th>Card</th>' +
     '<th>Co-op deposits</th><th>Vinay Gas</th><th>Receipts on no page</th><th>Sales vs IRAS</th><th>HSD litres</th><th>MS litres</th>' +
-    '<th>Testing days off</th></tr></thead><tbody>' +
+    '<th>Testing days off</th><th title="Days whose IRAS data isn’t whole (sales estimated from the meters, records short of the FCC’s count) or carries a dispenser warning">IRAS days flagged</th></tr></thead><tbody>' +
     rows.map(m => `<tr><th><a href="#" data-go="${m.first}" title="Open the month's first page">${monthName(m.month)}</a></th>${cells(m)}</tr>`).join('') +
     `</tbody><tfoot><tr><th>Total</th>${cells(total)}</tr></tfoot></table></div>` + catTable(rows, 'kharcha', 'Kharcha by category') +
     catTable(rows, 'money_in', 'Money in by category (repayments and other money in, from the cash flow)') +
     '<p class="mfoot muted">Each figure is the page minus the other side, added up over the days both sides cover; orange means off by more ' +
     'than ₹100, or a day off. Card money moves between neighbouring days, so only its month total counts. Sales and litres agree only by month: ' +
-    'the page runs 9 am to 9 am and IRAS by the calendar day, and sales are compared only on days IRAS captured in full. Click a month to open ' +
+    'the page runs 9 am to 9 am and IRAS by the calendar day, and sales are compared only on days IRAS captured in full. IRAS days flagged ' +
+    'counts the pages whose IRAS data has a gap (hover for the sales estimated from the meters), falls short of the FCC’s own count, or ' +
+    'carries a dispenser warning. Click a month to open ' +
     'its first page, or the flagged count to open its first ❌ page.</p>';
   $('#monthsClose').onclick = () => { $('#months').hidden = true; };
   $('#months').hidden = false;
