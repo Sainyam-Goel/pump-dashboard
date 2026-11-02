@@ -763,8 +763,8 @@ async function loadTestingFuel() {
     // Testing fuel: simple calendar day (midnight to midnight)
     const todayISO = new Date().toLocaleDateString('en-CA');
 
-    // Query testing transactions (payment_code=102) for today
-    const shiftRows = await query('iras_transactions', `date=eq.${todayISO}&payment_code=eq.102&select=nozzle_no,product,quantity,date,time_str`);
+    // Today's pump tests: IRAS files them as Pump Test (105), with payment code 102 or 99
+    const shiftRows = await query('iras_transactions', `date=eq.${todayISO}&iss_tran_type=eq.105&select=nozzle_no,product,quantity,date,time_str`);
     if (!shiftRows.length) return;
 
     let hsd = 0, ms = 0, lastTime = '';
