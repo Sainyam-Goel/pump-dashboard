@@ -533,16 +533,25 @@ function checksBox(p) {
 function sourcesBox(p) {
   const iras = p.iras || [];  // pages published before 2 Nov have none
   if (!p.sources.length && !p.others.length && !iras.length) return '';
-  const rows = p.sources.filter(s => s.status !== 'uncovered').map(s =>
+  const ud = p.sources.filter(s => s.kind === 'udhar'), found = ud.filter(s => s.status === 'verified' || s.status === 'shifted');
+  const missing = ud.filter(s => s.status === 'differs'), apart = ud.filter(s => s.status === 'shifted').length;
+  const udSt = missing.length ? 'differs' : found.length ? 'verified' : 'uncovered';
+  const udRow = !ud.length ? '' : `<div class="item st-${udSt}" data-places="${ud.map(s => s.places[0]).join(' ')}">` +
+    `<span class="ic">${ST[udSt][0]}</span> <b>Udhar against IRAS's sales</b> ${found.length} of ${ud.length} found` +
+    (apart ? `<span class="muted"> · ${apart} on the day either side</span>` : '') +
+    (missing.length ? ` · <b>not found: ${missing.map(s => val(s.page, '₹')).join(', ')}</b>` : '') +
+    (ud.length - found.length - missing.length ? `<span class="muted"> · ${ud.length - found.length - missing.length} on a day IRAS missed</span>` : '') +
+    '<span class="muted"> · click a line for its sale</span></div>';
+  const rows = p.sources.filter(s => s.status !== 'uncovered' && s.kind !== 'udhar').map(s =>
     `<div class="item st-${s.status}" data-places="${s.places.join(' ')}" title="${ST[s.status][1]}"><span class="ic">${ST[s.status][0]}</span> ` +
     `<b>${esc(s.name)}</b> <span class="muted">page ${val(s.page, s.unit)} ·</span> source ${val(s.other, s.unit)}` +
     `${s.status !== 'verified' && s.diff ? ` · <b>${diff(s.diff, s.unit)}</b>` : ''}<span class="muted">${shiftNote(s)}` +
     `${s.detail ? ` · ${esc(s.detail)}` : ''}</span></div>`).join('');
-  const none = p.sources.filter(s => s.status === 'uncovered').map(s => s.name);
+  const none = p.sources.filter(s => s.status === 'uncovered' && s.kind !== 'udhar').map(s => s.name);
   const gap = none.length ? `<div class="item st-uncovered"><span class="ic">○</span> <span class="muted">No data for this day: ${esc(none.join(', '))}</span></div>` : '';
   const own = iras.length ? '<div class="btitle sub">IRAS’s own data</div>' + iras.map(x =>
     `<div class="item st-${x.status}"><span class="ic">${ST[x.status][0]}</span> ${esc(x.text)}</div>`).join('') : '';
-  return `<div class="box"><div class="btitle">Other sources</div>${rows}${gap}${own}${p.others.map(o => `<div class="other">${esc(o)}</div>`).join('')}</div>`;
+  return `<div class="box"><div class="btitle">Other sources</div>${rows}${udRow}${gap}${own}${p.others.map(o => `<div class="other">${esc(o)}</div>`).join('')}</div>`;
 }
 
 function pageNoteBox(p) {
@@ -741,12 +750,14 @@ async function showMonths() {
   const keys = ['phonepe', 'card', 'deposits', 'sales', 'hsd_litres', 'ms_litres'];
   const total = { pages: 0, flagged: 0, failed: 0, testing_off: 0, unmatched: 0, first_flagged: null,
     review: { ok: 0, differs: 0, to_check: 0 }, vinay: { page: 0, hdfc: 0, days: 0 }, iras: { days: 0, estimated: 0 },
+    udhar: { lines: 0, off: 0 },
     sums: Object.fromEntries(keys.map(k => [k, { page: 0, diff: 0, days: 0, off: 0 }])) };
   for (const m of rows) {
     for (const k of ['pages', 'flagged', 'failed', 'testing_off', 'unmatched']) total[k] += m[k];
     for (const k in total.review) total.review[k] += m.review[k];
     for (const k in total.vinay) total.vinay[k] += m.vinay[k];
     for (const k in total.iras) total.iras[k] += m.iras?.[k] || 0;  // months published before 2 Nov have none
+    for (const k in total.udhar) total.udhar[k] += m.udhar?.[k] || 0;
     for (const k of keys) for (const f in total.sums[k]) total.sums[k][f] += m.sums[k][f];
   }
   const review = r => r.ok + r.differs + r.to_check ? `✓${r.ok} ✗${r.differs} ?${r.to_check}` : '<span class="muted">–</span>';
@@ -759,13 +770,14 @@ async function showMonths() {
     `<td class="${m.unmatched ? 'warn' : 'muted'}" title="Udhar parties' bank and co-op receipts written on no page">${m.unmatched ? inr(m.unmatched) : '–'}</td>` +
     sumCell(m.sums.sales, '₹') + sumCell(m.sums.hsd_litres, 'L') + sumCell(m.sums.ms_litres, 'L') +
     `<td class="${m.testing_off ? 'warn' : 'okc'}">${m.testing_off}</td>` + (!m.iras ? '<td class="muted">–</td>' :
-    `<td class="${m.iras.days ? 'warn' : 'okc'}" title="${m.iras.estimated ? inr(m.iras.estimated) + ' of sales estimated from the meters' : 'Nothing estimated'}">${m.iras.days}</td>`);
+    `<td class="${m.iras.days ? 'warn' : 'okc'}" title="${m.iras.estimated ? inr(m.iras.estimated) + ' of sales estimated from the meters' : 'Nothing estimated'}">${m.iras.days}</td>`) +
+    (!m.udhar ? '<td class="muted">–</td>' : `<td class="${m.udhar.off ? 'warn' : 'okc'}" title="${m.udhar.lines - m.udhar.off} of ${m.udhar.lines} udhar entries found among IRAS's sales">${m.udhar.off}</td>`);
   $('#months').innerHTML = `<div class="mhead"><h2>Month summary</h2><span class="muted">${rows.length ? monthName(rows[0].month) + ' – ' +
     monthName(rows[rows.length - 1].month) : ''} · each figure is the page minus the other side</span><span class="spacer"></span>` +
     '<button id="monthsClose" title="Close (Esc)">×</button></div><div class="mtable"><table class="months"><thead><tr><th>Month</th><th>Pages</th>' +
     '<th>Flagged</th><th>Sums ✗</th><th title="Your marks: OK on paper / Differs / To check">Your review</th><th>PhonePe</th><th>Card</th>' +
     '<th>Co-op deposits</th><th>Vinay Gas</th><th>Receipts on no page</th><th>Sales vs IRAS</th><th>HSD litres</th><th>MS litres</th>' +
-    '<th>Testing days off</th><th title="Days whose IRAS data isn’t whole (sales estimated from the meters, records short of the FCC’s count) or carries a dispenser warning">IRAS days flagged</th></tr></thead><tbody>' +
+    '<th>Testing days off</th><th title="Days whose IRAS data isn’t whole (sales estimated from the meters, records short of the FCC’s count) or carries a dispenser warning">IRAS days flagged</th><th title="Udhar entries with no dispenser sale of their amount or litres on their day or the day either side">Udhar not found</th></tr></thead><tbody>' +
     rows.map(m => `<tr><th><a href="#" data-go="${m.first}" title="Open the month's first page">${monthName(m.month)}</a></th>${cells(m)}</tr>`).join('') +
     `</tbody><tfoot><tr><th>Total</th>${cells(total)}</tr></tfoot></table></div>` + catTable(rows, 'kharcha', 'Kharcha by category') +
     catTable(rows, 'money_in', 'Money in by category (repayments and other money in, from the cash flow)') +
@@ -773,7 +785,8 @@ async function showMonths() {
     'than ₹100, or a day off. Card money moves between neighbouring days, so only its month total counts. Sales and litres agree only by month: ' +
     'the page runs 9 am to 9 am and IRAS by the calendar day, and sales are compared only on days IRAS captured in full. IRAS days flagged ' +
     'counts the pages whose IRAS data has a gap (hover for the sales estimated from the meters), falls short of the FCC’s own count, or ' +
-    'carries a dispenser warning. Click a month to open ' +
+    'carries a dispenser warning. Udhar not found counts the udhar entries with no dispenser sale (or run of sales on one ' +
+    'nozzle) of their amount or litres on their day or the day either side. Click a month to open ' +
     'its first page, or the flagged count to open its first ❌ page.</p>';
   $('#monthsClose').onclick = () => { $('#months').hidden = true; };
   $('#months').hidden = false;
