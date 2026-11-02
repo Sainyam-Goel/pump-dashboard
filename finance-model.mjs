@@ -36,8 +36,10 @@ export function csvCell(value) {
   return /[",\n\r]/.test(text)?'"'+text.replace(/"/g,'""')+'"':text;
 }
 
+// Gross adds the stock revalued at price changes (sql/031): cost is taken at each sale's day's price, but the fuel in
+// the tanks at a change was bought at the old one.
 export function pnlEstimate(a) {
-  const gross=a.cogs==null?null:a.revenue+a.ioclMargin-a.cogs;
+  const gross=a.cogs==null?null:a.revenue+a.ioclMargin-a.cogs+(Number(a.stockGain)||0);
   return {gross,net:a.estimate?a.estimate.net:null};
 }
 
@@ -67,11 +69,12 @@ export function dayKind({sales,estimated,prices,iocl,kharcha}) {
 
 // Net over a period's complete days, and a before-kharcha estimate over the days that lack only
 // kharcha. A whole-month view adds that month's YVR464 credit, shared by litres (margin.litres is the
-// month's total), so a month with missing days only gets their share.
+// month's total), so a month with missing days only gets their share. A day's stock is the gain (or, on a
+// price cut, loss) on the fuel in the tanks when the price changed that day (sql/031).
 export function periodEstimate(days, margin) {
   const total=(list,key)=>list.reduce((sum,day)=>sum+(Number(day[key])||0),0);
   const share=list=>margin && margin.litres>0?margin.credit*total(list,'litres')/margin.litres:0;
-  const operating=list=>total(list,'revenue')-total(list,'cogs')-total(list,'fees')+share(list);
+  const operating=list=>total(list,'revenue')-total(list,'cogs')-total(list,'fees')+total(list,'stock')+share(list);
   const counted=days.filter(day=>day.kind==='complete' || day.kind==='estimated'), before=days.filter(day=>day.kind==='before_kharcha');
   return {completeDays:days.filter(day=>day.kind==='complete').length,estimatedDays:days.filter(day=>day.kind==='estimated').length,
     beforeKharchaDays:before.length,

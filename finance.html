@@ -290,6 +290,8 @@ let dayLiters = {};     // { date: { ms_l, hsd_l } } — calendar-day liters fro
 let settlements = [];   // { date, source, amount, transactions }
 let ccTxns = [];        // { date, gross_amount, msf, net_payable, batch_no }
 let fuelRates = [];     // { date, petrol_rate, diesel_rate }
+let priceChanges = [];  // price_change_stock (sql/031): the fuel in the tanks revalued at each price change
+let priceChangesError = null;  // set when they couldn't be loaded: the P&L says so instead of showing 0
 let nozzleReceipts = []; // { date, nozzle_id, reading } — for monthly totalizer check
 let lubeSales = [];      // { date, product, quantity, amount } — real lube income (P&L)
 let padData = null;
@@ -365,6 +367,8 @@ async function loadAll() {
       query('v_customer_balances','order=party_name')]);
     shiftTotals=calendarSales.map(row=>({...row,shift_date:row.date,hsd_income:row.hsd_revenue,ms_income:row.ms_revenue}));
     dayLiters=Object.fromEntries(calendarSales.map(row=>[row.date,{ms_l:Number(row.ms_liters)||0,hsd_l:Number(row.hsd_liters)||0}]));
+    try { priceChanges = await query('price_change_stock', 'order=switched_at.asc,product.asc&select=product,switched_at,old_rate,new_rate,stock_liters,gain'); priceChangesError = null; }
+    catch (err) { priceChanges = []; priceChangesError = err; console.warn('price_change_stock not available:', err); }
     try { bankIocl = await query('bank_transactions', 'category=eq.iocl&order=date.asc,id.asc&select=date,withdrawal&limit=2000'); } catch (err) { bankIocl = []; console.warn('bank_transactions not available:', err); }
     try { bankAll = await query('bank_transactions', 'order=date.asc,id.asc&select=date&limit=5000'); } catch (err) { bankAll = []; }
     try { invoiceDates = await query('fuel_tanker_tracker', 'order=date.asc,id.asc&select=date&limit=1000'); } catch (err) { invoiceDates = []; }
@@ -468,6 +472,12 @@ function render() {
   renderTrend(present, start, end);
 }
 
+// The fuel in the tanks revalued on a price-change day (sql/031). A change with a tank unread has gain null:
+// it adds nothing and the P&L names it.
+function stockGainOn(date) {
+  return priceChanges.filter(r=>r.switched_at.slice(0,10)===date && r.gain!=null).reduce((sum,r)=>sum+Number(r.gain),0);
+}
+
 // One day's operating facts and why it falls short of a full net (REVIEW_2026-10-29 §1.3).
 function dayFacts(date, L) {
   const row=calendarSales.find(item=>item.date===date), cg=cogsForDay(date), close=L[date];
@@ -486,7 +496,7 @@ function dayFacts(date, L) {
     !flags.prices?'a sale is missing its price':!iocl?'IOCL statement not captured yet':!close?'no kharcha recorded':'';
   return {date,kind:financeModel.dayKind(flags),reason,
     revenue:(Number(row?.fuel_revenue)||0)+(est?Number(row.est_fuel_revenue):0)+lube,
-    cogs:(cg?cg.total:0)+(est?Number(row.est_fuel_cost)||0:0),fees,exp:Number(close?.total_expenses)||0,
+    cogs:(cg?cg.total:0)+(est?Number(row.est_fuel_cost)||0:0),fees,exp:Number(close?.total_expenses)||0,stock:stockGainOn(date),
     litres:(Number(row?.hsd_liters)||0)+(Number(row?.ms_liters)||0)+(est?(Number(row.est_hsd_liters)||0)+(Number(row.est_ms_liters)||0):0)};
 }
 
@@ -543,6 +553,8 @@ function agg(present) {
     });
   }
   digitalSales.forEach(d => { if (d.date >= start && d.date <= end) digitalFees += Number(d.fees) || 0; });  // card MSF, PhonePe
+  const changes = priceChanges.filter(r => r.switched_at.slice(0,10) >= start && r.switched_at.slice(0,10) <= end);
+  const stockGain = changes.reduce((sum, r) => sum + (Number(r.gain) || 0), 0), stockUnread = changes.filter(r => r.gain == null);
   const manual=present.filter(date=>L[date]);
   const opening=manual.length?L[manual[0]].yesterday_cash:null;
   const closing=manual.length?L[manual.at(-1)].total_cash:null;
@@ -561,7 +573,7 @@ function agg(present) {
   const estimateOnly = date => calendarSales.some(r => r.date === date && !Number(r.sales_transactions) && Number(r.est_fuel_revenue) > 0);
   if(present.some(date=>!cogsForDay(date) && !estimateOnly(date))) cogsTotal=null;
   else cogsTotal += estCost;
-  return { digitalFees, estRevenue, estCost, hsd, ms, other, cashRepaid, otherIn, otherOut, fark, breaks, bankRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL, ioclMargin, ioclFees,complete,estimate,missing:facts.filter(day=>day.kind!=='complete'),manualDays:manual.length,requestedDays:requested.length };
+  return { digitalFees, estRevenue, estCost, stockGain, stockUnread, hsd, ms, other, cashRepaid, otherIn, otherOut, fark, breaks, bankRepaid, income: revenue, revenue, ledgerInc, exp, credit, pp, hdfc, bank, picked, opening, closing, days: present.length, cogs: cogsTotal, hsdL, msL, ioclMargin, ioclFees,complete,estimate,missing:facts.filter(day=>day.kind!=='complete'),manualDays:manual.length,requestedDays:requested.length };
 }
 
 // "27 of 31 days complete", or "27 complete + 3 estimated from the meters, of 31 days"
@@ -621,7 +633,11 @@ function renderPnl(present) {
     <div class="ledger-row total"><span class="label">Total Income</span><span class="amt text-green">${fmtR(a.income)}</span></div>`;
   if (a.ioclMargin !== 0) html += `<div class="ledger-row"><span class="label">+ IOCL Dealer Margin (YVR464, whole month)</span><span class="amt text-green">+${fmtR(a.ioclMargin)}</span></div>`;
   html += `
-    <div class="ledger-row"><span class="label">Estimated fuel cost — transaction-day prices and matching litres${a.estCost ? ` (incl. ${fmtR(a.estCost)} for the sales from the meters)` : ''}</span><span class="amt text-orange">&minus;${fmtR(a.cogs)}</span></div>
+    <div class="ledger-row"><span class="label">Estimated fuel cost — transaction-day prices and matching litres${a.estCost ? ` (incl. ${fmtR(a.estCost)} for the sales from the meters)` : ''}</span><span class="amt text-orange">&minus;${fmtR(a.cogs)}</span></div>${
+    priceChangesError ? `
+    <div class="warn">The fuel in the tanks at price changes couldn't be loaded, so gross and net leave it out. Reload the page.</div>` : ''}${
+    a.stockGain || a.stockUnread.length ? `
+    <div class="ledger-row"><span class="label">Fuel in the tanks revalued at price changes${a.stockUnread.length ? ` (${a.stockUnread.length} change${a.stockUnread.length > 1 ? 's' : ''} with a tank unread, not counted)` : ''}</span><span class="amt ${a.stockGain >= 0 ? 'text-green' : 'text-red'}">${a.stockGain >= 0 ? '+' : '&minus;'}${fmtR(Math.abs(a.stockGain))}</span></div>` : ''}
     <div class="ledger-row total"><span class="label">Gross Margin</span><span class="amt ${gross >= 0 ? 'text-green' : 'text-red'}">${fmtR(gross)}</span></div>
     <div class="ledger-row"><span class="label">Total Expenses (Kharcha)</span><span class="amt text-red">&minus;${fmtR(a.exp)}</span></div>`;
   if (a.ioclFees !== 0) html += `<div class="ledger-row"><span class="label">IOCL Fees &amp; Interest (e-lock, license, participation)</span><span class="amt text-red">&minus;${fmtR(a.ioclFees)}</span></div>`;
@@ -630,7 +646,7 @@ function renderPnl(present) {
     <div class="ledger-row total pnl-net ${(e.net??0) >= 0 ? 'positive' : 'negative'}"><span class="label">Operating estimate &mdash; ${daysCounted(e, a)}</span><span class="amt">${fmtR(e.net)}</span></div>`;
   if (e.beforeKharchaDays) html += `<div class="ledger-row"><span class="label">Before kharcha &mdash; ${e.beforeKharchaDays} day${e.beforeKharchaDays>1?'s':''} with no kharcha recorded</span><span class="amt">${fmtR(e.beforeKharcha)}</span></div>`;
   if (e.marginShare) html += `<div class="ledger-row"><span class="label">incl. YVR464 dealer margin, shared by litres</span><span class="amt text-green">+${fmtR(e.marginShare)}</span></div>`;
-  html += `<div class="card-sub">Counted days only: sales &minus; fuel cost &minus; IOCL, card and PhonePe fees${period==='month'?' + YVR464 dealer margin':''} &minus; kharcha.${period==='month'?'':' YVR464 is booked to whole months.'}</div>`;
+  html += `<div class="card-sub">Counted days only: sales &minus; fuel cost${a.stockGain ? ' &plusmn; fuel in the tanks revalued at price changes' : ''} &minus; IOCL, card and PhonePe fees${period==='month'?' + YVR464 dealer margin':''} &minus; kharcha.${period==='month'?'':' YVR464 is booked to whole months.'}</div>`;
   if (notCounted.length) html += `<div class="warn">Not counted: ${notCounted.slice(0,8).map(day=>`${fmtDate(day.date)} (${day.reason})`).join(' &middot; ')}${notCounted.length>8?` &middot; +${notCounted.length-8} more`:''}</div>`;
 
   el.innerHTML = html;
@@ -1125,6 +1141,8 @@ function pnlRows(a) {
     ['Total Income (IRAS revenue + lube)', money(a.income)],
     ['IOCL Dealer Margin (YVR464)', money(a.ioclMargin)],
     ['Estimated fuel cost',a.cogs==null?'':money(a.cogs)],
+    ...(priceChangesError ? [['Fuel in the tanks revalued at price changes', 'not loaded']] :
+      a.stockGain || a.stockUnread.length ? [['Fuel in the tanks revalued at price changes', money(a.stockGain)]] : []),
     ['  COGS HSD liters', money(a.hsdL)],
     ['  COGS MS liters', money(a.msL)],
     ['Gross Margin', money(gross)],
@@ -1181,7 +1199,7 @@ function dailyRows(dates, L) {
     const exp = r.total_expenses || 0;
     // Daily figures leave out YVR464, which is booked to whole months.
     const day=dayFacts(d,L);
-    const net=day.kind==='complete'?day.revenue-day.cogs-day.fees-day.exp:null;
+    const net=day.kind==='complete'?day.revenue-day.cogs-day.fees-day.exp+day.stock:null;
     rows.push([
       d,
       money(r.hsd_income), money(r.ms_income),
