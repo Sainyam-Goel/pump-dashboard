@@ -241,7 +241,8 @@ async function getJSON(url, opts) {
 }
 
 async function published(url) {  // the viewer's own /api answers as the Mac uploaded them, with everyone's live feedback
-  const path = { '/api/index': 'index.json', '/api/months': 'months.json', '/api/category_lines': 'category_lines.json' }[url] ||
+  const path = { '/api/index': 'index.json', '/api/months': 'months.json', '/api/category_lines': 'category_lines.json',
+    '/api/staff': 'staff.json' }[url] ||
     (url.startsWith('/api/page?date=') ? `pages/${url.slice('/api/page?date='.length)}.json` : '');
   if (!path) throw new Error('Not in the dashboard copy: ' + url);
   const { data, error } = await DB.storage.from(BUCKET).download(path);
@@ -747,6 +748,7 @@ function sumCell(s, u, tol, offDays) {
 
 async function showMonths() {
   const rows = (await getJSON('/api/months')).filter(m => m.month >= FY_START.slice(0, 7) || $('#early').checked);
+  const staff = await getJSON('/api/staff').catch(() => null);  // a dashboard copy from before 2 Nov has none
   const keys = ['phonepe', 'card', 'deposits', 'sales', 'hsd_litres', 'ms_litres'];
   const total = { pages: 0, flagged: 0, failed: 0, testing_off: 0, unmatched: 0, first_flagged: null,
     review: { ok: 0, differs: 0, to_check: 0 }, vinay: { page: 0, hdfc: 0, days: 0 }, iras: { days: 0, estimated: 0 },
@@ -779,7 +781,8 @@ async function showMonths() {
     '<th>Co-op deposits</th><th>Vinay Gas</th><th>Receipts on no page</th><th>Sales vs IRAS</th><th>HSD litres</th><th>MS litres</th>' +
     '<th>Testing days off</th><th title="Days whose IRAS data isn’t whole (sales estimated from the meters, records short of the FCC’s count) or carries a dispenser warning">IRAS days flagged</th><th title="Udhar entries with no dispenser sale of their amount or litres on their day or the day either side">Udhar not found</th></tr></thead><tbody>' +
     rows.map(m => `<tr><th><a href="#" data-go="${m.first}" title="Open the month's first page">${monthName(m.month)}</a></th>${cells(m)}</tr>`).join('') +
-    `</tbody><tfoot><tr><th>Total</th>${cells(total)}</tr></tfoot></table></div>` + catTable(rows, 'kharcha', 'Kharcha by category') +
+    `</tbody><tfoot><tr><th>Total</th>${cells(total)}</tr></tfoot></table></div>` + staffTable(staff, rows) +
+    catTable(rows, 'kharcha', 'Kharcha by category') +
     catTable(rows, 'money_in', 'Money in by category (repayments and other money in, from the cash flow)') +
     '<p class="mfoot muted">Each figure is the page minus the other side, added up over the days both sides cover; orange means off by more ' +
     'than ₹100, or a day off. Card money moves between neighbouring days, so only its month total counts. Sales and litres agree only by month: ' +
@@ -790,6 +793,38 @@ async function showMonths() {
     'its first page, or the flagged count to open its first ❌ page.</p>';
   $('#monthsClose').onclick = () => { $('#months').hidden = true; };
   $('#months').hidden = false;
+}
+
+function staffTable(st, rows) {  // each person's salaries by the month they were paid, with the advances each should cut
+  if (!st || !st.people.length) return '';
+  const MARK = { cut: ['✓', 'okc', 'the advances were cut from it'], not_cut: ['✗', 'bad', 'the full salary went out although advances were taken'],
+    changed: ['◐', 'warn', 'it differs from the salaries either side (a raise, part of a month, leaving?)'], part: ['', 'muted', 'part of a month'],
+    ok: ['', '', ''] };
+  const months = rows.map(m => m.month), short = m => new Date(m + '-01T00:00:00').toLocaleDateString('en-GB', { month: 'short' });
+  const cell = (p, mo) => {
+    const es = p.events.filter(e => e.date.slice(0, 7) === mo);
+    if (!es.length) return '<td class="muted">–</td>';
+    const worst = ['not_cut', 'changed', 'part', 'cut', 'ok'].find(s => es.some(e => e.status === s));
+    const tip = es.map(e => `${monthName(e.month)} salary, paid ${day(e.date)}: ${inr(e.paid)}` +
+      (e.lump ? ` (from the ${inr(e.lump.amount)} “${e.lump.label}”, split by the page’s notes)` : '') +
+      (e.advances.length ? ` + advances ${e.advances.map(([d, a]) => `${inr(a)} (${day(d)})`).join(', ')} = ${inr(e.pay)}` : '') +
+      (MARK[e.status][2] ? `: ${MARK[e.status][2]}` : '') + (e.usual.length ? ` · either side: ${e.usual.map(inr).join(' / ')}` : '')).join('\n');
+    return `<td class="${MARK[worst][1]}" title="${esc(tip)}">${es.map(e => inr(e.pay)).join(' + ')} ${MARK[worst][0]}</td>`;
+  };
+  const open = p => !p.open.length ? '<td class="okc">–</td>' : `<td class="warn" title="${esc(p.open.map(([d, a]) => `${inr(a)} on ${day(d)}`).join('\n'))}">` +
+    `${inr(p.open.reduce((s, [, a]) => s + a, 0))}</td>`;
+  const lump = mo => { const us = st.unnamed.filter(u => u.date.slice(0, 7) === mo);
+    return !us.length ? '<td class="muted">–</td>' : `<td title="${esc(us.map(u => `${inr(u.amount)} on ${day(u.date)}: ${u.label}`).join('\n'))}">` +
+      `${inr(us.reduce((s, u) => s + u.amount, 0))}</td>`; };
+  return `<h3>Staff pay: each salary with the advances taken since the one before, by the month it was paid</h3><div class="mtable">` +
+    '<table class="months"><thead><tr><th>Person</th>' + months.map(m => `<th>${short(m)}</th>`).join('') +
+    '<th title="Advances taken after the last salary, for the next one to cut">Advances not cut yet</th></tr></thead><tbody>' +
+    st.people.map(p => `<tr><th${p.events.length ? '' : ' class="warn" title="No salary written by this name on any page since 1 Apr"'}>` +
+      `${esc(p.name)}</th>${months.map(mo => cell(p, mo)).join('')}${open(p)}</tr>`).join('') +
+    (st.unnamed.length ? `<tr><th title="Salary lines that name no one">Not by name</th>${months.map(lump).join('')}<td class="muted">–</td></tr>` : '') +
+    '</tbody></table></div><p class="mfoot muted">Salary paid + advances taken since the last salary, as the owner pays them: ✓ advances cut · ✗ the full salary ' +
+    'went out although advances were taken · ◐ differs from the salaries either side (a raise, part of a month, someone leaving). Hover a cell for the ' +
+    'dates. A line saying salary or naming a month is a salary (paid late if the month is older); otherwise the largest payment by the 13th is.</p>';
 }
 
 function catTable(rows, key, title) {
