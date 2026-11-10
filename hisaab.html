@@ -901,7 +901,7 @@ async function showKhata() {  // ops/khata_view.py: the ledger book's accounts a
   $('#khata').hidden = false;
 }
 
-const KIND_LABEL = { hisaab: 'Hisaab pages (photos)', hdfc: 'HDFC statement (PDF)', coop: 'Co-op statement (photos)' };
+const KIND_LABEL = { hisaab: 'Hisaab pages (photos)', hdfc: 'HDFC statement (PDF or .xls)', coop: 'Co-op statement (photos)' };
 const JOB_STATUS = { queued: 'waiting to start', running: 'working…', waiting: 'ready: check, then Apply', done: 'done', failed: 'stopped' };
 const postJSON = (url, body) => getJSON(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 let picked = [], jobTimer = null;
