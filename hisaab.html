@@ -104,7 +104,9 @@ table.grid { border-collapse: separate; border-spacing: 0; width: 100%; border: 
 button.primary { background: var(--sel); color: #fff; border-color: var(--sel); }
 button.primary:hover { background: #6d28d9; }
 .err { background: #ffe3e3; color: #a51111; padding: 8px 12px; }
-#months, #inbox { position: absolute; inset: 0; z-index: 5; background: var(--panel); overflow: auto; padding: 14px 18px; }
+#months, #inbox, #khata { position: absolute; inset: 0; z-index: 5; background: var(--panel); overflow: auto; padding: 14px 18px; }
+.kcrop { display: block; max-width: 640px; width: 100%; margin-top: 4px; border: 1px solid var(--line); }
+table.khata td { white-space: normal; text-align: left; }
 .drop { border: 2px dashed var(--line); border-radius: 10px; padding: 12px 14px; background: var(--soft); max-width: 780px; display: grid; gap: 8px; justify-items: start; }
 .drop.over { border-color: var(--sel); background: #f5f2ff; }
 .kinds { display: flex; gap: 16px; flex-wrap: wrap; }
@@ -157,6 +159,7 @@ td .sub { font-size: 11px; color: var(--muted); font-weight: 400; }
   <label title="Also list the pages from before the fiscal year starts on 1 April"><input type="checkbox" id="early"> Show Feb–Mar</label>
   <button id="monthsBtn" title="Month summary">Months</button>
   <button id="inboxBtn" title="Upload new hisaab photos and statements">Add files</button>
+  <button id="khataBtn" title="The credit khata and salary sheets against the pages and the banks">Khata</button>
   <span class="legend">
     <span><i style="border-color: var(--red)"></i>sum fails</span>
     <span><i style="border-color: var(--orange)"></i>differs from a source</span>
@@ -174,6 +177,7 @@ td .sub { font-size: 11px; color: var(--muted); font-weight: 400; }
   <aside id="side"><div id="content"></div><div id="detail"></div></aside>
   <section id="months" hidden></section>
   <section id="inbox" hidden></section>
+  <section id="khata" hidden></section>
 </main>
 <script>
 const NS = 'http://www.w3.org/2000/svg';
@@ -543,7 +547,13 @@ function sourcesBox(p) {
     (missing.length ? ` · <b>not found: ${missing.map(s => val(s.page, '₹')).join(', ')}</b>` : '') +
     (ud.length - found.length - missing.length ? `<span class="muted"> · ${ud.length - found.length - missing.length} on a day IRAS missed</span>` : '') +
     '<span class="muted"> · click a line for its sale</span></div>';
-  const rows = p.sources.filter(s => s.status !== 'uncovered' && s.kind !== 'udhar').map(s =>
+  const kh = p.sources.filter(s => s.kind === 'khata'), khFound = kh.filter(s => s.status === 'verified' || s.status === 'shifted');
+  const khOff = kh.filter(s => s.status === 'differs'), khSt = khOff.length ? 'differs' : 'verified';
+  const khRow = !kh.length ? '' : `<div class="item st-${khSt}" data-places="${kh.map(s => s.places[0]).join(' ')}">` +
+    `<span class="ic">${ST[khSt][0]}</span> <b>Udhar and repayments against the credit khata</b> ${khFound.length} of ${kh.length} found` +
+    (kh.some(s => s.status === 'shifted') ? `<span class="muted"> · ${kh.filter(s => s.status === 'shifted').length} on another day</span>` : '') +
+    (khOff.length ? ` · <b>differs: ${khOff.map(s => val(s.page, '₹')).join(', ')}</b>` : '') + '<span class="muted"> · click a line for its khata row</span></div>';
+  const rows = p.sources.filter(s => s.status !== 'uncovered' && s.kind !== 'udhar' && s.kind !== 'khata').map(s =>
     `<div class="item st-${s.status}" data-places="${s.places.join(' ')}" title="${ST[s.status][1]}"><span class="ic">${ST[s.status][0]}</span> ` +
     `<b>${esc(s.name)}</b> <span class="muted">page ${val(s.page, s.unit)} ·</span> source ${val(s.other, s.unit)}` +
     `${s.status !== 'verified' && s.diff ? ` · <b>${diff(s.diff, s.unit)}</b>` : ''}<span class="muted">${shiftNote(s)}` +
@@ -552,7 +562,7 @@ function sourcesBox(p) {
   const gap = none.length ? `<div class="item st-uncovered"><span class="ic">○</span> <span class="muted">No data for this day: ${esc(none.join(', '))}</span></div>` : '';
   const own = iras.length ? '<div class="btitle sub">IRAS’s own data</div>' + iras.map(x =>
     `<div class="item st-${x.status}"><span class="ic">${ST[x.status][0]}</span> ${esc(x.text)}</div>`).join('') : '';
-  return `<div class="box"><div class="btitle">Other sources</div>${rows}${udRow}${gap}${own}${p.others.map(o => `<div class="other">${esc(o)}</div>`).join('')}</div>`;
+  return `<div class="box"><div class="btitle">Other sources</div>${rows}${udRow}${khRow}${gap}${own}${p.others.map(o => `<div class="other">${esc(o)}</div>`).join('')}</div>`;
 }
 
 function pageNoteBox(p) {
@@ -597,7 +607,8 @@ function renderDetail() {
     const s = S.page.sources[i];
     facts.push(`<div class="st-${s.status}"><span class="ic">${ST[s.status][0]}</span> ${esc(s.name)}: page ${val(s.page, s.unit)} · ` +
       (s.status === 'uncovered' ? 'no data for this day' : `source ${val(s.other, s.unit)}${s.diff ? ' · ' + diff(s.diff, s.unit) : ''}`) +
-      shiftNote(s) + (s.detail ? ` <span class="muted">(${esc(s.detail)})</span>` : '') + '</div>');
+      shiftNote(s) + (s.detail ? ` <span class="muted">(${esc(s.detail)})</span>` : '') + '</div>' +
+      (s.crop && !HOSTED ? `<img class="kcrop" loading="lazy" src="${s.crop}" alt="the khata row">` : ''));
   }
   if (!l.check && !l.sources.length) facts.push('<div class="muted">No page sum or other source covers this line.</div>');
   if (l.why) facts.push(`<div>📷 Settled on the photo: ${esc(l.why)}</div>`);
@@ -752,7 +763,7 @@ async function showMonths() {
   const keys = ['phonepe', 'card', 'deposits', 'sales', 'hsd_litres', 'ms_litres'];
   const total = { pages: 0, flagged: 0, failed: 0, testing_off: 0, unmatched: 0, first_flagged: null,
     review: { ok: 0, differs: 0, to_check: 0 }, vinay: { page: 0, hdfc: 0, days: 0 }, iras: { days: 0, estimated: 0 },
-    udhar: { lines: 0, off: 0 },
+    udhar: { lines: 0, off: 0 }, khata: { lines: 0, off: 0 },
     sums: Object.fromEntries(keys.map(k => [k, { page: 0, diff: 0, days: 0, off: 0 }])) };
   for (const m of rows) {
     for (const k of ['pages', 'flagged', 'failed', 'testing_off', 'unmatched']) total[k] += m[k];
@@ -760,6 +771,7 @@ async function showMonths() {
     for (const k in total.vinay) total.vinay[k] += m.vinay[k];
     for (const k in total.iras) total.iras[k] += m.iras?.[k] || 0;  // months published before 2 Nov have none
     for (const k in total.udhar) total.udhar[k] += m.udhar?.[k] || 0;
+    for (const k in total.khata) total.khata[k] += m.khata?.[k] || 0;
     for (const k of keys) for (const f in total.sums[k]) total.sums[k][f] += m.sums[k][f];
   }
   const review = r => r.ok + r.differs + r.to_check ? `✓${r.ok} ✗${r.differs} ?${r.to_check}` : '<span class="muted">–</span>';
@@ -773,13 +785,14 @@ async function showMonths() {
     sumCell(m.sums.sales, '₹') + sumCell(m.sums.hsd_litres, 'L') + sumCell(m.sums.ms_litres, 'L') +
     `<td class="${m.testing_off ? 'warn' : 'okc'}">${m.testing_off}</td>` + (!m.iras ? '<td class="muted">–</td>' :
     `<td class="${m.iras.days ? 'warn' : 'okc'}" title="${m.iras.estimated ? inr(m.iras.estimated) + ' of sales estimated from the meters' : 'Nothing estimated'}">${m.iras.days}</td>`) +
-    (!m.udhar ? '<td class="muted">–</td>' : `<td class="${m.udhar.off ? 'warn' : 'okc'}" title="${m.udhar.lines - m.udhar.off} of ${m.udhar.lines} udhar entries found among IRAS's sales">${m.udhar.off}</td>`);
+    (!m.udhar ? '<td class="muted">–</td>' : `<td class="${m.udhar.off ? 'warn' : 'okc'}" title="${m.udhar.lines - m.udhar.off} of ${m.udhar.lines} udhar entries found among IRAS's sales">${m.udhar.off}</td>`) +
+    (!m.khata?.lines ? '<td class="muted">–</td>' : `<td class="${m.khata.off ? 'warn' : 'okc'}" title="${m.khata.lines - m.khata.off} of ${m.khata.lines} udhar entries and repayments found in the credit khata">${m.khata.off}</td>`);
   $('#months').innerHTML = `<div class="mhead"><h2>Month summary</h2><span class="muted">${rows.length ? monthName(rows[0].month) + ' – ' +
     monthName(rows[rows.length - 1].month) : ''} · each figure is the page minus the other side</span><span class="spacer"></span>` +
     '<button id="monthsClose" title="Close (Esc)">×</button></div><div class="mtable"><table class="months"><thead><tr><th>Month</th><th>Pages</th>' +
     '<th>Flagged</th><th>Sums ✗</th><th title="Your marks: OK on paper / Differs / To check">Your review</th><th>PhonePe</th><th>Card</th>' +
     '<th>Co-op deposits</th><th>Vinay Gas</th><th>Receipts on no page</th><th>Sales vs IRAS</th><th>HSD litres</th><th>MS litres</th>' +
-    '<th>Testing days off</th><th title="Days whose IRAS data isn’t whole (sales estimated from the meters, records short of the FCC’s count) or carries a dispenser warning">IRAS days flagged</th><th title="Udhar entries with no dispenser sale of their amount or litres on their day or the day either side">Udhar not found</th></tr></thead><tbody>' +
+    '<th>Testing days off</th><th title="Days whose IRAS data isn’t whole (sales estimated from the meters, records short of the FCC’s count) or carries a dispenser warning">IRAS days flagged</th><th title="Udhar entries with no dispenser sale of their amount or litres on their day or the day either side">Udhar not found</th><th title="Udhar entries and repayments of a party whose credit khata covers the day, with no matching khata row (or a different amount)">Not in the khata</th></tr></thead><tbody>' +
     rows.map(m => `<tr><th><a href="#" data-go="${m.first}" title="Open the month's first page">${monthName(m.month)}</a></th>${cells(m)}</tr>`).join('') +
     `</tbody><tfoot><tr><th>Total</th>${cells(total)}</tr></tfoot></table></div>` + staffTable(staff, rows) +
     catTable(rows, 'kharcha', 'Kharcha by category') +
@@ -839,6 +852,53 @@ function catTable(rows, key, title) {
       `<td><b>${inr0(sum(cats[c]))}</b></td></tr>`).join('') +
     '</tbody><tfoot><tr><th>Total</th>' + rows.map(m => `<td>${inr0(sum(m[key]))}</td>`).join('') +
     `<td>${inr0(order.reduce((a, c) => a + sum(cats[c]), 0))}</td></tr></tfoot></table></div>`;
+}
+
+async function showKhata() {  // ops/khata_view.py: the ledger book's accounts against the pages, sales and banks
+  const k = await getJSON('/api/khata');
+  const day = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '–';
+  const go = d => d ? `<a href="#${d}" data-go="${d}">${day(d)}</a>` : '–';
+  const amt = v => v === '' || v == null ? '' : inr(+v);
+  const kinds = { customer: 'Customers (udhar)', staff: 'Salary sheets', other: 'Other accounts' };
+  let html = '<div class="mhead"><h2>Credit khata and salary sheets</h2><span class="muted">each account read from its photos ' +
+    'and checked row by row against the hisaab pages, the dispenser sales and the bank statements</span><span class="spacer"></span>' +
+    '<button id="khataClose" title="Close (Esc)">×</button></div>';
+  for (const kind of ['customer', 'staff', 'other']) {
+    const accts = k.accounts.filter(a => a.kind === kind);
+    if (!accts.length) continue;
+    html += `<h3>${kinds[kind]}</h3><div class="mtable"><table class="months"><thead><tr><th>Account</th><th>Pages</th><th>Dates</th>` +
+      (kind === 'staff' ? '<th>Payments on the pages</th>' : '<th>Udhar rows on the pages</th><th>Receipts found</th><th>Last balance</th>') +
+      '<th>To look at</th></tr></thead><tbody>' + accts.map(a => `<tr><th title="${esc(a.written)}"><a href="#" data-acct="${a.key}">${esc(a.name)}</a></th>` +
+      `<td>${a.pages}</td><td>${day(a.first)} – ${day(a.last)}</td>` +
+      (kind === 'staff' ? `<td class="${a.found < a.checked ? 'warn' : 'okc'}">${a.found} of ${a.checked}</td>` :
+        `<td class="${a.found < a.checked ? 'warn' : 'okc'}">${a.found} of ${a.checked}</td>` +
+        `<td class="${a.receipts_found < a.receipts ? 'warn' : 'okc'}">${a.receipts_found} of ${a.receipts}</td><td>${a.last_balance == null ? '–' : inr(a.last_balance)}</td>`) +
+      `<td class="${a.differences ? 'warn' : 'okc'}">${a.differences || '–'}</td></tr>`).join('') + '</tbody></table></div>';
+  }
+  html += '<div id="khataRows"></div>';
+  $('#khata').innerHTML = html;
+  const show = key => {
+    const ds = k.differences.filter(d => d.account === key);
+    const a = k.accounts.find(x => x.key === key);
+    $('#khataRows').innerHTML = `<h3>${esc(a.name)}: ${ds.length} to look at</h3>` + (!ds.length ? '<p class="muted">Every row agrees.</p>' :
+      '<div class="mtable"><table class="months khata"><thead><tr><th>Date</th><th>What</th><th>Khata</th><th>Page</th><th>Bank / sale</th></tr></thead><tbody>' +
+      ds.map(d => `<tr><th>${day(d.date)}</th><td>${esc(d.what)}</td>` +
+        `<td>${amt(d.amount)}${d.liters ? ` · ${d.liters} L` : ''}${d.note ? `<div class="sub">${esc(d.note)}</div>` : ''}` +
+        (d.stem ? `<img class="kcrop" loading="lazy" src="/khata/${d.stem}/${d.row}.jpg" alt="${esc(d.stem)} row ${d.row}">` : '') + '</td>' +
+        `<td>${d.page ? go(d.page) + (d.page_amount ? ` ${amt(d.page_amount)}` : '') + (d.page_liters ? ` · ${d.page_liters} L` : '') +
+          (d.page_src ? `<div class="sub">${esc(d.page_src)}</div>` : '') : d.label ? esc(d.label) : '–'}</td>` +
+        `<td>${d.matched ? `${esc(d.matched)} ${day(d.matched_date)} ${amt(d.matched_amount)}` : ''}${d.sale ? `<div class="sub">${esc(d.sale_status)}: ${esc(d.sale)}</div>` : ''}</td></tr>`).join('') +
+      '</tbody></table></div>');
+  };
+  $('#khata').onclick = e => {
+    const acct = e.target.closest('[data-acct]');
+    if (acct) { e.preventDefault(); show(acct.dataset.acct); return; }
+    const a = e.target.closest('[data-go]');
+    if (a) { e.preventDefault(); $('#khata').hidden = true; openPage(a.dataset.go); }
+  };
+  $('#khataClose').onclick = () => { $('#khata').hidden = true; };
+  if (k.accounts.length) show(k.accounts[0].key);
+  $('#khata').hidden = false;
 }
 
 const KIND_LABEL = { hisaab: 'Hisaab pages (photos)', hdfc: 'HDFC statement (PDF)', coop: 'Co-op statement (photos)' };
@@ -949,6 +1009,7 @@ $('#inbox').addEventListener('click', async e => {
 });
 
 $('#monthsBtn').onclick = showMonths;
+if (HOSTED) $('#khataBtn').hidden = true; else $('#khataBtn').onclick = showKhata;
 $('#months').addEventListener('click', e => {
   const a = e.target.closest('[data-go]');
   if (!a) return;
@@ -988,6 +1049,7 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'Escape') {
     if (!$('#inbox').hidden) $('#inbox').hidden = true;
     else if (!$('#months').hidden) $('#months').hidden = true;
+    else if (!$('#khata').hidden) $('#khata').hidden = true;
     else select(null);
   }
   else if (e.key === '+' || e.key === '=') setZoom(S.zoom * 1.25);
