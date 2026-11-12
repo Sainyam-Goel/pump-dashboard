@@ -29,7 +29,7 @@ label{display:block;margin:12px 0 4px}small{color:#a3adc1}textarea{min-height:90
 <script type="module">
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2';
 const base='https://zkomggcvakdocbgrglkn.supabase.co';
-const key='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inprb21nZ2N2YWtkb2NiZ3JnbGtuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4NjI5MjIsImV4cCI6MjA5MDQzODkyMn0.Ma3NTFbjiLk4iFN7jgA3jXWT7m3di6gayD3svsnwQpc';
+const key='sb_publishable_8LGjCM2sz6yyWDVfFtRGpw_fJJQgFVm';  // publishable key: public by design, RLS decides what a session reads
 const client=createClient(base,key);const $=id=>document.getElementById(id);
 const status=message=>{$('status').textContent=message;};
 const today=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});$('date').value=today;$('date').max=today;

@@ -188,7 +188,7 @@ const S = { index: [], date: null, page: null, by: {}, order: [], sel: null, zoo
 // what the Mac viewer published to the private bucket (sql/027), which only an approved operator can read.
 const HOSTED = location.pathname.endsWith('/hisaab.html');
 const SUPABASE = 'https://zkomggcvakdocbgrglkn.supabase.co', BUCKET = 'hisaab-viewer';
-const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inprb21nZ2N2YWtkb2NiZ3JnbGtuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4NjI5MjIsImV4cCI6MjA5MDQzODkyMn0.Ma3NTFbjiLk4iFN7jgA3jXWT7m3di6gayD3svsnwQpc';
+const PUBLISHABLE_KEY = 'sb_publishable_8LGjCM2sz6yyWDVfFtRGpw_fJJQgFVm';
 let DB = null;
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -384,7 +384,7 @@ async function signIn() {
   $('#inboxBtn').style.display = 'none';  // uploads need the Mac's tools
   $('#early').parentElement.style.display = 'none';  // the copy holds the pages from 1 Apr only (header labels are flex, so not .hidden)
   const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2.118.0');
-  DB = createClient(SUPABASE, ANON_KEY);
+  DB = createClient(SUPABASE, PUBLISHABLE_KEY);
   const { data: { session } } = await DB.auth.getSession();
   if (session && (await DB.rpc('is_pump_operator')).data === true) {
     $('#saveState').insertAdjacentHTML('beforebegin', '<a href="./">Dashboard</a><a href="finance.html">Finance</a>' +
